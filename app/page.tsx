@@ -1,64 +1,178 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import React, { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+// --- CONEXIÓN A SUPABASE ---
+const supabase = createClient(
+  'https://spdhfslvbslsuuzckmqr.supabase.co',
+  'sb_publishable_DH68PA1DWbc66PALwVDyXA_dHLQPrL1'
+);
+
+type TabType = 'RESUMEN' | 'BUSQUEDA' | 'BASE_DATOS' | 'GASTOS_GRAL' | 'GASTOS_MENSUAL';
+
+export default function FinanzasTorreD10() {
+  const [isAuth, setIsAuth] = useState(false);
+  const [pin, setPin] = useState('');
+  const [activeTab, setActiveTab] = useState<TabType>('RESUMEN');
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin === 'adminfinanzas') setIsAuth(true); // Cambia tu clave aquí
+    else alert('Acceso denegado.');
+  };
+
+  if (!isAuth) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
+        <form onSubmit={handleLogin} className="bg-white border border-slate-200 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
+          <div className="flex justify-center mb-6">
+            <div className="bg-emerald-900 p-4 rounded-full shadow-lg">
+              <span className="text-3xl text-white">🏛️</span>
+            </div>
+          </div>
+          <h1 className="text-xl font-bold text-center text-emerald-950 uppercase tracking-widest mb-2">Finanzas D-10</h1>
+          <p className="text-center text-xs text-slate-500 mb-6 uppercase tracking-wider">Portal Tesorería</p>
+          <input type="password" placeholder="Clave de Tesorería" className="w-full bg-slate-50 border border-slate-300 rounded-lg p-3 text-center text-emerald-950 font-bold tracking-widest outline-none focus:border-emerald-600 mb-6 transition-colors shadow-inner" value={pin} onChange={e => setPin(e.target.value)} />
+          <button type="submit" className="w-full bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg uppercase tracking-wider transition-colors shadow-lg text-sm">Desbloquear Bóveda</button>
+        </form>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased pb-12">
+      
+      {/* HEADER BANCARIO / EJECUTIVO */}
+      <header className="bg-emerald-950 border-b-4 border-emerald-700 py-4 px-6 shadow-xl sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto flex flex-col gap-5">
+          <div className="flex items-center justify-between w-full">
+            <div className="w-1/3 flex justify-start items-center gap-3">
+              <span className="text-2xl">🏛️</span>
+              <div>
+                <h1 className="text-lg font-bold text-white uppercase tracking-widest leading-tight">Torre D-10</h1>
+                <h2 className="text-[10px] text-emerald-400 uppercase tracking-widest">Wealth Management System</h2>
+              </div>
+            </div>
+
+            <div className="w-1/3 text-center">
+              <span className="bg-emerald-900 text-emerald-100 text-xs px-4 py-1.5 rounded-full border border-emerald-800 font-mono tracking-widest shadow-inner">
+                ESTADO: EN LÍNEA
+              </span>
+            </div>
+
+            <div className="w-1/3 flex justify-end">
+              <button onClick={() => { setIsAuth(false); setPin(''); }} className="text-[10px] bg-white text-emerald-950 px-4 py-2 rounded-md hover:bg-slate-200 transition-colors uppercase font-bold tracking-widest shadow-md">
+                Cerrar Sesión
+              </button>
+            </div>
+          </div>
+
+          {/* MENÚ DE PESTAÑAS EJECUTIVO */}
+          <div className="flex justify-between bg-emerald-900/50 p-1 rounded-lg border border-emerald-800/50 w-full overflow-x-auto shadow-inner">
+            {[
+              { id: 'RESUMEN', label: '1. Resumen Finanzas' },
+              { id: 'BUSQUEDA', label: '2. Búsqueda por Nombre' },
+              { id: 'BASE_DATOS', label: '3. Base de Datos Principal' },
+              { id: 'GASTOS_GRAL', label: '4. Relación de Gastos' },
+              { id: 'GASTOS_MENSUAL', label: '5. Relación Mensual' }
+            ].map(tab => (
+              <button 
+                key={tab.id} 
+                onClick={() => setActiveTab(tab.id as TabType)} 
+                className={`flex-1 py-2.5 px-4 text-[11px] font-bold uppercase tracking-wider rounded-md transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-emerald-950 shadow-md' : 'text-emerald-100 hover:bg-emerald-800 hover:text-white'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+      </header>
+
+      {/* ÁREA DE CONTENIDO DINÁMICO */}
+      <main className="max-w-7xl mx-auto px-6 pt-8 animate-fadeIn">
+        
+        {/* PESTAÑA 1: RESUMEN FINANZAS */}
+        {activeTab === 'RESUMEN' && (
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Resumen Financiero Consolidado</h2>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              {/* Tarjetas de Muestra (Mockup) */}
+              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-emerald-600">
+                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Total Ingresos USD</p>
+                <p className="text-3xl font-mono font-bold text-emerald-900">0.00</p>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-600">
+                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Total Gastos USD</p>
+                <p className="text-3xl font-mono font-bold text-red-900">0.00</p>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-emerald-400">
+                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Total Ingresos Bs</p>
+                <p className="text-3xl font-mono font-bold text-emerald-700">0.00</p>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-amber-500">
+                <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Saldo Actual Bs</p>
+                <p className="text-3xl font-mono font-bold text-amber-600">0.00</p>
+              </div>
+            </div>
+            <div className="bg-white h-96 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center">
+              <p className="text-slate-400 font-bold uppercase tracking-widest">Espacio Reservado para Gráficos Dinámicos (Recharts)</p>
+            </div>
+          </div>
+        )}
+
+        {/* PESTAÑA 2: BÚSQUEDA POR NOMBRE */}
+        {activeTab === 'BUSQUEDA' && (
+          <div>
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Estado de Cuenta por Apartamento</h2>
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+               <p className="text-slate-500">Aquí integraremos el buscador híbrido para ver deudas históricas y pagos realizados.</p>
+            </div>
+          </div>
+        )}
+
+        {/* PESTAÑA 3: BASE DE DATOS PRINCIPAL */}
+        {activeTab === 'BASE_DATOS' && (
+          <div>
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Master Ledger (Libro Mayor de Residentes)</h2>
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+               <p className="text-slate-500">Aquí colocaremos los 4 filtros (Fecha, Mes, Piso, Apto) conectados a Supabase.</p>
+            </div>
+          </div>
+        )}
+
+        {/* PESTAÑA 4: RELACIÓN DE GASTOS */}
+        {activeTab === 'GASTOS_GRAL' && (
+          <div>
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Libro Diario de Transacciones (10 Columnas)</h2>
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
+               <table className="w-full text-left text-sm">
+                 <thead className="bg-emerald-900 text-white font-mono uppercase text-[10px] tracking-wider">
+                   <tr>
+                     <th className="p-3">Año</th><th className="p-3">Mes</th><th className="p-3">Año-Mes</th>
+                     <th className="p-3">Referencias</th><th className="p-3">Ingresos USD</th><th className="p-3">Gastos USD</th>
+                     <th className="p-3">Saldo USD</th><th className="p-3">Ingresos Bs</th><th className="p-3">Gastos Bs</th>
+                     <th className="p-3">Saldo Bs</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   <tr><td colSpan={10} className="p-6 text-center text-slate-400">Tabla lista para recibir datos de Supabase</td></tr>
+                 </tbody>
+               </table>
+            </div>
+          </div>
+        )}
+
+        {/* PESTAÑA 5: RELACIÓN MENSUAL */}
+        {activeTab === 'GASTOS_MENSUAL' && (
+          <div>
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Cierre Contable Mensual (8 Columnas)</h2>
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+               <p className="text-slate-500">Aquí irá el filtro por mes para agrupar los gastos de la Pestaña 4.</p>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   );

@@ -51,7 +51,7 @@ export default function FinanzasTorreD10() {
               <span className="text-2xl">🏛️</span>
               <div>
                 <h1 className="text-lg font-bold text-white uppercase tracking-widest leading-tight">Torre D-10</h1>
-                <h2 className="text-[10px] text-emerald-400 uppercase tracking-widest">Wealth Management System</h2>
+                <h2 className="text-[10px] text-emerald-400 uppercase tracking-widest"> DESARROLLO HABITACIONAL CIUDAD TIUNA "SECTOR SIMÓN BOLÍVAR" DISTRITO CAPITAL SECTOR D TORRE D-10</h2>
               </div>
             </div>
 

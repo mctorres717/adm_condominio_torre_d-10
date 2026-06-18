@@ -18,7 +18,7 @@ export default function FinanzasTorreD10() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === 'adminfinanzas') setIsAuth(true); // Cambia tu clave aquí
+    if (pin === 'admin') setIsAuth(true); // Cambia tu clave aquí
     else alert('Acceso denegado.');
   };
 

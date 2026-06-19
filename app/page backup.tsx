@@ -141,22 +141,63 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 4: RELACIÓN DE GASTOS */}
+{/* PESTAÑA 4: RELACIÓN DE GASTOS */}
         {activeTab === 'GASTOS_GRAL' && (
-          <div>
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Libro Diario de Transacciones (10 Columnas)</h2>
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Registro de Transacciones</h2>
+            
+            {/* FORMULARIO DE ENTRADA */}
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-emerald-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input type="text" placeholder="Año" className="p-2 border rounded" id="new_anio" />
+              <input type="text" placeholder="Mes" className="p-2 border rounded" id="new_mes" />
+              <input type="number" placeholder="Ingreso USD" className="p-2 border rounded" id="new_ing_usd" />
+              <input type="number" placeholder="Gasto USD" className="p-2 border rounded" id="new_gas_usd" />
+              <input type="number" placeholder="Ingreso Bs" className="p-2 border rounded" id="new_ing_bs" />
+              <input type="number" placeholder="Gasto Bs" className="p-2 border rounded" id="new_gas_bs" />
+              <button 
+                onClick={async () => {
+                  const data = {
+                    anio: (document.getElementById('new_anio') as HTMLInputElement).value,
+                    mes: (document.getElementById('new_mes') as HTMLInputElement).value,
+                    ingreso_usd: parseFloat((document.getElementById('new_ing_usd') as HTMLInputElement).value),
+                    gasto_usd: parseFloat((document.getElementById('new_gas_usd') as HTMLInputElement).value),
+                    ingreso_bs: parseFloat((document.getElementById('new_ing_bs') as HTMLInputElement).value),
+                    gasto_bs: parseFloat((document.getElementById('new_gas_bs') as HTMLInputElement).value),
+                    fecha: new Date().toISOString()
+                  };
+                  const { error } = await supabase.from('finanzas_d10').insert(data);
+                  if (!error) alert("Transacción registrada con éxito");
+                  else alert("Error: " + error.message);
+                }}
+                className="bg-emerald-700 text-white font-bold py-2 rounded shadow-md hover:bg-emerald-800"
+              >
+                Registrar Movimiento
+              </button>
+            </div>
+
+            {/* TABLA DE VISUALIZACIÓN */}
             <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
-               <table className="w-full text-left text-sm">
-                 <thead className="bg-emerald-900 text-white font-mono uppercase text-[10px] tracking-wider">
+               <table className="w-full text-left text-xs">
+                 <thead className="bg-emerald-900 text-white uppercase tracking-wider">
                    <tr>
-                     <th className="p-3">Año</th><th className="p-3">Mes</th><th className="p-3">Año-Mes</th>
-                     <th className="p-3">Referencias</th><th className="p-3">Ingresos USD</th><th className="p-3">Gastos USD</th>
-                     <th className="p-3">Saldo USD</th><th className="p-3">Ingresos Bs</th><th className="p-3">Gastos Bs</th>
-                     <th className="p-3">Saldo Bs</th>
+                     <th className="p-3">Año</th><th className="p-3">Mes</th>
+                     <th className="p-3">Ingresos USD</th><th className="p-3">Gastos USD</th>
+                     <th className="p-3">Saldo USD</th><th className="p-3">Ingresos Bs</th>
+                     <th className="p-3">Gastos Bs</th><th className="p-3">Saldo Bs</th>
                    </tr>
                  </thead>
-                 <tbody>
-                   <tr><td colSpan={10} className="p-6 text-center text-slate-400">Tabla lista para recibir datos de Supabase</td></tr>
+                 <tbody className="divide-y divide-slate-100">
+                    {/* Aquí mapearíamos los datos con: propietarios.map(...) */}
+                    <tr className="hover:bg-slate-50">
+                        <td className="p-3">2026</td>
+                        <td className="p-3">Junio</td>
+                        <td className="p-3 text-emerald-600 font-bold">1200.00</td>
+                        <td className="p-3 text-red-600 font-bold">450.00</td>
+                        <td className="p-3 font-mono font-bold">750.00</td>
+                        <td className="p-3 text-emerald-600 font-bold">5000.00</td>
+                        <td className="p-3 text-red-600 font-bold">2000.00</td>
+                        <td className="p-3 font-mono font-bold">3000.00</td>
+                    </tr>
                  </tbody>
                </table>
             </div>

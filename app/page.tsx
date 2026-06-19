@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // --- CONEXIÓN A SUPABASE ---
@@ -16,9 +16,96 @@ export default function FinanzasTorreD10() {
   const [pin, setPin] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('RESUMEN');
 
+  // --- ESTADOS DE LA BASE DE DATOS ---
+  const [transacciones, setTransacciones] = useState<any[]>([]);
+
+  // --- ESTADOS DEL FORMULARIO DE GASTOS ---
+  const [formGasto, setFormGasto] = useState({
+    anio: new Date().getFullYear().toString(),
+    mes: '',
+    referencia: '',
+    descripcion: '',
+    ingreso_usd: '',
+    gasto_usd: '',
+    ingreso_bs: '',
+    gasto_bs: ''
+  });
+
+  // --- EFECTOS (CARGA INICIAL) ---
+  useEffect(() => {
+    if (isAuth) {
+      fetchTransacciones();
+    }
+  }, [isAuth]);
+
+  // --- LÓGICA DE NEGOCIO (CONTROLADOR FINANCIERO) ---
+  const fetchTransacciones = async () => {
+    const { data, error } = await supabase
+      .from('finanzas_d10')
+      .select('*')
+      .order('fecha', { ascending: true }) // Orden cronológico obligatorio para contabilidad
+      .order('id', { ascending: true });
+
+    if (error) {
+      console.error("Error cargando transacciones:", error);
+      return;
+    }
+
+    if (data) {
+      // Algoritmo de Saldo Acumulado (Running Balance)
+      let saldoAcumuladoUSD = 0;
+      let saldoAcumuladoBs = 0;
+
+      const contabilidadProcesada = data.map(t => {
+        saldoAcumuladoUSD += (Number(t.ingreso_usd) - Number(t.gasto_usd));
+        saldoAcumuladoBs += (Number(t.ingreso_bs) - Number(t.gasto_bs));
+        
+        return { 
+          ...t, 
+          saldo_usd: saldoAcumuladoUSD, 
+          saldo_bs: saldoAcumuladoBs 
+        };
+      });
+
+      setTransacciones(contabilidadProcesada);
+    }
+  };
+
+  const handleRegistrarMovimiento = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validación básica
+    if (!formGasto.anio || !formGasto.mes || !formGasto.descripcion) {
+      return alert("El Año, Mes y Descripción son obligatorios.");
+    }
+
+    const payload = {
+      fecha: new Date().toISOString(), // Timestamp exacto
+      anio: formGasto.anio,
+      mes: formGasto.mes,
+      referencia: formGasto.referencia || 'N/A',
+      descripcion: formGasto.descripcion,
+      ingreso_usd: Number(formGasto.ingreso_usd) || 0,
+      gasto_usd: Number(formGasto.gasto_usd) || 0,
+      ingreso_bs: Number(formGasto.ingreso_bs) || 0,
+      gasto_bs: Number(formGasto.gasto_bs) || 0,
+    };
+
+    const { error } = await supabase.from('finanzas_d10').insert([payload]);
+
+    if (error) {
+      alert(`Error al registrar: ${error.message}`);
+    } else {
+      alert("✅ Transacción registrada en el Libro Mayor.");
+      // Limpiar formulario y recargar tabla
+      setFormGasto({ ...formGasto, referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' });
+      fetchTransacciones();
+    }
+  };
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === 'admin') setIsAuth(true); // Cambia tu clave aquí
+    if (pin === 'adminfinanzas') setIsAuth(true); 
     else alert('Acceso denegado.');
   };
 
@@ -51,7 +138,7 @@ export default function FinanzasTorreD10() {
               <span className="text-2xl">🏛️</span>
               <div>
                 <h1 className="text-lg font-bold text-white uppercase tracking-widest leading-tight">Torre D-10</h1>
-                <h2 className="text-[10px] text-emerald-400 uppercase tracking-widest"> DESARROLLO HABITACIONAL CIUDAD TIUNA "SECTOR SIMÓN BOLÍVAR" DISTRITO CAPITAL SECTOR D TORRE D-10</h2>
+                <h2 className="text-[10px] text-emerald-400 uppercase tracking-widest">Wealth Management System</h2>
               </div>
             </div>
 
@@ -69,7 +156,7 @@ export default function FinanzasTorreD10() {
           </div>
 
           {/* MENÚ DE PESTAÑAS EJECUTIVO */}
-          <div className="flex justify-between bg-emerald-900/50 p-1 rounded-lg border border-emerald-800/50 w-full overflow-x-auto shadow-inner">
+          <div className="flex justify-between bg-emerald-900/50 p-1 rounded-lg border border-emerald-800/50 w-full overflow-x-auto shadow-inner custom-scrollbar">
             {[
               { id: 'RESUMEN', label: '1. Resumen Finanzas' },
               { id: 'BUSQUEDA', label: '2. Búsqueda por Nombre' },
@@ -97,7 +184,6 @@ export default function FinanzasTorreD10() {
           <div className="space-y-6">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Resumen Financiero Consolidado</h2>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {/* Tarjetas de Muestra (Mockup) */}
               <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-emerald-600">
                 <p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Total Ingresos USD</p>
                 <p className="text-3xl font-mono font-bold text-emerald-900">0.00</p>
@@ -115,104 +201,101 @@ export default function FinanzasTorreD10() {
                 <p className="text-3xl font-mono font-bold text-amber-600">0.00</p>
               </div>
             </div>
-            <div className="bg-white h-96 rounded-xl shadow-lg border border-slate-200 flex items-center justify-center">
-              <p className="text-slate-400 font-bold uppercase tracking-widest">Espacio Reservado para Gráficos Dinámicos (Recharts)</p>
-            </div>
           </div>
         )}
 
-        {/* PESTAÑA 2: BÚSQUEDA POR NOMBRE */}
-        {activeTab === 'BUSQUEDA' && (
-          <div>
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Estado de Cuenta por Apartamento</h2>
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí integraremos el buscador híbrido para ver deudas históricas y pagos realizados.</p>
-            </div>
-          </div>
-        )}
-
-        {/* PESTAÑA 3: BASE DE DATOS PRINCIPAL */}
-        {activeTab === 'BASE_DATOS' && (
-          <div>
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Master Ledger (Libro Mayor de Residentes)</h2>
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí colocaremos los 4 filtros (Fecha, Mes, Piso, Apto) conectados a Supabase.</p>
-            </div>
-          </div>
-        )}
-
-{/* PESTAÑA 4: RELACIÓN DE GASTOS */}
+        {/* PESTAÑA 4: RELACIÓN DE GASTOS */}
         {activeTab === 'GASTOS_GRAL' && (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Registro de Transacciones</h2>
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Libro Diario de Transacciones</h2>
             
-            {/* FORMULARIO DE ENTRADA */}
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-emerald-100 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input type="text" placeholder="Año" className="p-2 border rounded" id="new_anio" />
-              <input type="text" placeholder="Mes" className="p-2 border rounded" id="new_mes" />
-              <input type="number" placeholder="Ingreso USD" className="p-2 border rounded" id="new_ing_usd" />
-              <input type="number" placeholder="Gasto USD" className="p-2 border rounded" id="new_gas_usd" />
-              <input type="number" placeholder="Ingreso Bs" className="p-2 border rounded" id="new_ing_bs" />
-              <input type="number" placeholder="Gasto Bs" className="p-2 border rounded" id="new_gas_bs" />
-              <button 
-                onClick={async () => {
-                  const data = {
-                    anio: (document.getElementById('new_anio') as HTMLInputElement).value,
-                    mes: (document.getElementById('new_mes') as HTMLInputElement).value,
-                    ingreso_usd: parseFloat((document.getElementById('new_ing_usd') as HTMLInputElement).value),
-                    gasto_usd: parseFloat((document.getElementById('new_gas_usd') as HTMLInputElement).value),
-                    ingreso_bs: parseFloat((document.getElementById('new_ing_bs') as HTMLInputElement).value),
-                    gasto_bs: parseFloat((document.getElementById('new_gas_bs') as HTMLInputElement).value),
-                    fecha: new Date().toISOString()
-                  };
-                  const { error } = await supabase.from('finanzas_d10').insert(data);
-                  if (!error) alert("Transacción registrada con éxito");
-                  else alert("Error: " + error.message);
-                }}
-                className="bg-emerald-700 text-white font-bold py-2 rounded shadow-md hover:bg-emerald-800"
-              >
-                Registrar Movimiento
-              </button>
-            </div>
+            {/* PANEL DE INGRESO DE DATOS */}
+            <form onSubmit={handleRegistrarMovimiento} className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Registrar Nuevo Movimiento</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <input type="text" placeholder="Año (Ej. 2026)" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" required />
+                <select value={formGasto.mes} onChange={e => setFormGasto({...formGasto, mes: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500 bg-white" required>
+                  <option value="">-- Mes --</option>
+                  {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input type="text" placeholder="Referencia (Ej. Zelle 1234)" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" />
+                <input type="text" placeholder="Descripción del Gasto/Ingreso" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" required />
+              </div>
 
-            {/* TABLA DE VISUALIZACIÓN */}
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
-               <table className="w-full text-left text-xs">
-                 <thead className="bg-emerald-900 text-white uppercase tracking-wider">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Ingreso USD (+)</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formGasto.ingreso_usd} onChange={e => setFormGasto({...formGasto, ingreso_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Gasto USD (-)</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formGasto.gasto_usd} onChange={e => setFormGasto({...formGasto, gasto_usd: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono focus:outline-none focus:border-red-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Ingreso Bs (+)</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formGasto.ingreso_bs} onChange={e => setFormGasto({...formGasto, ingreso_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Gasto Bs (-)</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formGasto.gasto_bs} onChange={e => setFormGasto({...formGasto, gasto_bs: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono focus:outline-none focus:border-red-500" />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button type="submit" className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs transition-colors">
+                  💾 Guardar Transacción
+                </button>
+              </div>
+            </form>
+
+            {/* TABLA DEL LIBRO MAYOR */}
+            <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
+               <table className="w-full text-left text-xs whitespace-nowrap">
+                 <thead className="bg-emerald-950 text-white font-mono uppercase text-[10px] tracking-wider">
                    <tr>
-                     <th className="p-3">Año</th><th className="p-3">Mes</th>
-                     <th className="p-3">Ingresos USD</th><th className="p-3">Gastos USD</th>
-                     <th className="p-3">Saldo USD</th><th className="p-3">Ingresos Bs</th>
-                     <th className="p-3">Gastos Bs</th><th className="p-3">Saldo Bs</th>
+                     <th className="p-4">Periodo</th>
+                     <th className="p-4">Descripción / Ref</th>
+                     <th className="p-4 text-right bg-emerald-900">Ingreso $</th>
+                     <th className="p-4 text-right bg-red-950">Gasto $</th>
+                     <th className="p-4 text-right border-r border-slate-700">Saldo $</th>
+                     <th className="p-4 text-right bg-emerald-900">Ingreso Bs</th>
+                     <th className="p-4 text-right bg-red-950">Gasto Bs</th>
+                     <th className="p-4 text-right">Saldo Bs</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-100">
-                    {/* Aquí mapearíamos los datos con: propietarios.map(...) */}
-                    <tr className="hover:bg-slate-50">
-                        <td className="p-3">2026</td>
-                        <td className="p-3">Junio</td>
-                        <td className="p-3 text-emerald-600 font-bold">1200.00</td>
-                        <td className="p-3 text-red-600 font-bold">450.00</td>
-                        <td className="p-3 font-mono font-bold">750.00</td>
-                        <td className="p-3 text-emerald-600 font-bold">5000.00</td>
-                        <td className="p-3 text-red-600 font-bold">2000.00</td>
-                        <td className="p-3 font-mono font-bold">3000.00</td>
-                    </tr>
+                    {transacciones.length === 0 ? (
+                      <tr><td colSpan={8} className="p-8 text-center text-slate-400 font-medium">No hay transacciones registradas.</td></tr>
+                    ) : (
+                      transacciones.map((t, idx) => (
+                        <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4">
+                            <span className="font-bold">{t.anio}</span> <span className="text-slate-500 uppercase text-[10px]">{t.mes}</span>
+                          </td>
+                          <td className="p-4">
+                            <div className="font-medium text-slate-800">{t.descripcion}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Ref: {t.referencia}</div>
+                          </td>
+                          <td className="p-4 text-right font-mono text-emerald-600">{Number(t.ingreso_usd) > 0 ? `+${t.ingreso_usd}` : '-'}</td>
+                          <td className="p-4 text-right font-mono text-red-600">{Number(t.gasto_usd) > 0 ? `-${t.gasto_usd}` : '-'}</td>
+                          <td className="p-4 text-right font-mono font-bold border-r border-slate-100 bg-slate-50">{t.saldo_usd.toFixed(2)}</td>
+                          <td className="p-4 text-right font-mono text-emerald-600">{Number(t.ingreso_bs) > 0 ? `+${t.ingreso_bs}` : '-'}</td>
+                          <td className="p-4 text-right font-mono text-red-600">{Number(t.gasto_bs) > 0 ? `-${t.gasto_bs}` : '-'}</td>
+                          <td className="p-4 text-right font-mono font-bold bg-slate-50">{t.saldo_bs.toFixed(2)}</td>
+                        </tr>
+                      ))
+                    )}
                  </tbody>
                </table>
             </div>
           </div>
         )}
 
-        {/* PESTAÑA 5: RELACIÓN MENSUAL */}
-        {activeTab === 'GASTOS_MENSUAL' && (
-          <div>
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Cierre Contable Mensual (8 Columnas)</h2>
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí irá el filtro por mes para agrupar los gastos de la Pestaña 4.</p>
-            </div>
-          </div>
-        )}
+        {/* PESTAÑAS RESTANTES (MOCKUPS POR AHORA) */}
+        {activeTab === 'BUSQUEDA' && (<div><h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Estado de Cuenta por Apartamento</h2><div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200"><p className="text-slate-500">En desarrollo...</p></div></div>)}
+        {activeTab === 'BASE_DATOS' && (<div><h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Master Ledger (Libro Mayor de Residentes)</h2><div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200"><p className="text-slate-500">En desarrollo...</p></div></div>)}
+        {activeTab === 'GASTOS_MENSUAL' && (<div><h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2 mb-6">Cierre Contable Mensual</h2><div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200"><p className="text-slate-500">En desarrollo...</p></div></div>)}
 
       </main>
     </div>

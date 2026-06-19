@@ -16,10 +16,13 @@ export default function FinanzasTorreD10() {
   const [pin, setPin] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('RESUMEN');
 
-  // --- ESTADOS DE LA BASE DE DATOS ---
+  // --- ESTADOS DE LA BASE DE DATOS (PESTAÑA 4) ---
   const [transacciones, setTransacciones] = useState<any[]>([]);
 
-  // --- ESTADOS DEL FORMULARIO DE GASTOS ---
+  // --- ESTADOS DE LA BASE DE DATOS DE RESIDENTES (PESTAÑA 3) ---
+  const [pagosResidentes, setPagosResidentes] = useState<any[]>([]);
+
+  // --- ESTADOS DEL FORMULARIO DE GASTOS (PESTAÑA 4) ---
   const [formGasto, setFormGasto] = useState({
     anio: new Date().getFullYear().toString(),
     mes: '',
@@ -30,6 +33,23 @@ export default function FinanzasTorreD10() {
     ingreso_bs: '',
     gasto_bs: ''
   });
+
+  // --- ESTADOS DEL FORMULARIO DE RECAUDACIÓN (PESTAÑA 3) ---
+  const [formPagoResidente, setFormPagoResidente] = useState({
+    apartamento: '',
+    piso: '',
+    mes_correspondiente: '',
+    anio_correspondiente: new Date().getFullYear().toString(),
+    monto_pagado_usd: '',
+    deuda_acumulada_usd: '',
+    estatus_solvencia: ''
+  });
+
+  // --- ESTADOS DE LOS 4 FILTROS DE LA BASE DE DATOS PRINCIPAL (PESTAÑA 3) ---
+  const [filtroAnio, setFiltroAnio] = useState('');
+  const [filtroMes, setFiltroMes] = useState('');
+  const [filtroPiso, setFiltroPiso] = useState('');
+  const [filtroApto, setFiltroApto] = useState('');
 
   // --- PERSISTENCIA DE SESIÓN Y AUTO-CIERRE ---
   useEffect(() => {
@@ -70,11 +90,12 @@ export default function FinanzasTorreD10() {
   useEffect(() => {
     if (isAuth) {
       fetchTransacciones();
+      fetchPagosResidentes();
     }
   }, [isAuth]);
 
   const fetchTransacciones = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('finanzas_d10')
       .select('*')
       .order('fecha', { ascending: true }) 
@@ -96,6 +117,23 @@ export default function FinanzasTorreD10() {
       });
 
       setTransacciones(contabilidadProcesada);
+    }
+  };
+
+  const fetchPagosResidentes = async () => {
+    const { data, error } = await supabase
+      .from('pagos_residentes')
+      .select('*')
+      .order('piso', { ascending: true })
+      .order('apartamento', { ascending: true });
+
+    if (error) {
+      console.error("Error cargando base de datos principal:", error);
+      return;
+    }
+
+    if (data) {
+      setPagosResidentes(data);
     }
   };
 
@@ -148,6 +186,45 @@ export default function FinanzasTorreD10() {
     }
   };
 
+  const handleRegistrarPagoResidente = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formPagoResidente.apartamento || !formPagoResidente.piso || !formPagoResidente.mes_correspondiente || !formPagoResidente.estatus_solvencia) {
+      // Ajuste de validación dinámico interno para selectores
+    }
+    
+    if (!formPagoResidente.apartamento || !formPagoResidente.piso || !formPagoResidente.mes_correspondiente || !formPagoResidente.estatus_solvencia) {
+      return alert("Por favor rellena Apartamento, Piso, Mes y Estatus de Solvencia.");
+    }
+
+    const payload = {
+      apartamento: formPagoResidente.apartamento.toUpperCase(),
+      piso: formPagoResidente.piso,
+      mes_correspondiente: formPagoResidente.mes_correspondiente,
+      anio_correspondiente: formPagoResidente.anio_correspondiente,
+      monto_pagado_usd: Number(formPagoResidente.monto_pagado_usd) || 0,
+      deuda_acumulada_usd: Number(formPagoResidente.deuda_acumulada_usd) || 0,
+      estatus_solvencia: formPagoResidente.estatus_solvencia
+    };
+
+    const { error } = await supabase.from('pagos_residentes').insert([payload]);
+
+    if (error) {
+      alert(`Error al guardar en Base de Datos Principal: ${error.message}`);
+    } else {
+      alert(`✅ Registro del Apto ${payload.apartamento} guardado con éxito.`);
+      setFormPagoResidente({
+        apartamento: '',
+        piso: '',
+        mes_correspondiente: '',
+        anio_correspondiente: new Date().getFullYear().toString(),
+        monto_pagado_usd: '',
+        deuda_acumulada_usd: '',
+        estatus_solvencia: ''
+      });
+      fetchPagosResidentes();
+    }
+  };
+
   const handlePrint = (tituloArchivo: string) => {
     const tituloOriginal = document.title;
     document.title = tituloArchivo;
@@ -163,7 +240,7 @@ export default function FinanzasTorreD10() {
     }).format(amount);
   };
 
-  // --- MOTOR MATEMÁTICO DEL DASHBOARD ---
+  // --- MOTOR MATEMÁTICO DEL DASHBOARD CONTABLE ---
   const totalIngresoUSD = transacciones.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
   const totalGastoUSD = transacciones.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
   const saldoActualUSD = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_usd : 0;
@@ -171,6 +248,15 @@ export default function FinanzasTorreD10() {
   const totalIngresoBs = transacciones.reduce((acc, t) => acc + Number(t.ingreso_bs), 0);
   const totalGastoBs = transacciones.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
   const saldoActualBs = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_bs : 0;
+
+  // --- MOTOR DE FILTRADO EN TIEMPO REAL (4 FILTROS SIMULTÁNEOS - PESTAÑA 3) ---
+  const dataResidentesFiltrada = pagosResidentes.filter(p => {
+    const cumpleAnio = filtroAnio === '' || p.anio_correspondiente.toLowerCase().includes(filtroAnio.toLowerCase());
+    const cumpleMes = filtroMes === '' || p.mes_correspondiente === filtroMes;
+    const cumplePiso = filtroPiso === '' || p.piso.toString().toLowerCase().includes(filtroPiso.toLowerCase());
+    const cumpleApto = filtroApto === '' || p.apartamento.toLowerCase().includes(filtroApto.toLowerCase());
+    return cumpleAnio && cumpleMes && cumplePiso && cumpleApto;
+  });
 
   // --- INTERFAZ DE LOGIN ---
   if (!isAuth) {
@@ -253,7 +339,7 @@ export default function FinanzasTorreD10() {
       {/* ÁREA DE CONTENIDO DINÁMICO */}
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8 animate-fadeIn">
         
-        {/* PESTAÑA 1: RESUMEN FINANZAS (DIVIDIDO EN USD Y BS CON NUEVA NOMENCLATURA) */}
+        {/* PESTAÑA 1: RESUMEN FINANZAS */}
         {activeTab === 'RESUMEN' && (
           <div className="no-print space-y-6">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Resumen Financiero Consolidado</h2>
@@ -306,7 +392,7 @@ export default function FinanzasTorreD10() {
             </div>
             
             <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí integraremos el buscador de apartamentos en la siguiente fase para reflejar los pagos históricos de la pestaña 3.</p>
+               <p className="text-slate-500">Aquí se programará el buscador dinámico cruzado con la data de la pestaña 3.</p>
             </div>
 
             <div className="print-area hidden print:block bg-white text-black p-8 font-serif">
@@ -316,12 +402,113 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 3: BASE DE DATOS PRINCIPAL */}
+        {/* PESTAÑA 3: BASE DE DATOS PRINCIPAL (DISEÑO FLANTE Y SISTEMA DE 4 FILTROS ACTIVADO) */}
         {activeTab === 'BASE_DATOS' && (
-          <div className="no-print space-y-6">
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Master Ledger (Libro Mayor de Residentes)</h2>
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí se programará la inserción masiva y los 4 filtros avanzados.</p>
+          <div className="no-print space-y-6 animate-fadeIn">
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Master Ledger de Residentes</h2>
+            
+            {/* FORMULARIO DE RECAUDACIÓN / INGRESO DE PAGOS */}
+            <form onSubmit={handleRegistrarPagoResidente} className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Cargar Pago de Condominio</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Apartamento</label>
+                  <input type="text" placeholder="Ej. 1-A" value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500 uppercase" required />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Piso</label>
+                  <input type="text" placeholder="Ej. 1" value={formPagoResidente.piso} onChange={e => setFormPagoResidente({...formPagoResidente, piso: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" required />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Año</label>
+                  <input type="text" placeholder="Ej. 2026" value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" required />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Mes a Cancelar</label>
+                  <select value={formPagoResidente.mes_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, mes_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500 bg-white" required>
+                    <option value="">-- Seleccionar --</option>
+                    {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Monto Abonado USD</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Deuda Remanente USD</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.deuda_acumulada_usd} onChange={e => setFormPagoResidente({...formPagoResidente, deuda_acumulada_usd: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono focus:outline-none focus:border-red-500" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Estatus Administrativo</label>
+                  <select value={formPagoResidente.estatus_solvencia} onChange={e => setFormPagoResidente({...formPagoResidente, estatus_solvencia: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500 bg-white" required>
+                    <option value="">-- Seleccionar --</option>
+                    <option value="SOLVENTE">🟢 SOLVENTE</option>
+                    <option value="MOROSO">🔴 MOROSO</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs transition-colors">
+                  💾 Registrar Abono de Residente
+                </button>
+              </div>
+            </form>
+
+            {/* SECCIÓN DE LOS 4 FILTROS AVANZADOS EN PARALELO */}
+            <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-3">Filtros de Auditoría Avanzada</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <input type="text" placeholder="🔍 Filtrar por Año" value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 font-mono" />
+                <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 cursor-pointer">
+                  <option value="">🔍 Todos los Meses</option>
+                  {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <input type="text" placeholder="🔍 Filtrar por Piso" value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500" />
+                <input type="text" placeholder="🔍 Filtrar por Apartamento" value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 uppercase font-bold text-emerald-800" />
+              </div>
+            </div>
+
+            {/* VISUALIZACIÓN DE LA DATA FILTRADA */}
+            <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
+              <table className="w-full text-left text-xs whitespace-nowrap">
+                <thead className="bg-slate-900 text-white font-mono uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="p-4 text-center">Nivel</th>
+                    <th className="p-4">Apartamento</th>
+                    <th className="p-4">Periodo Auditado</th>
+                    <th className="p-4 text-right bg-emerald-950/20">Monto Abonado</th>
+                    <th className="p-4 text-right bg-red-950/20">Deuda Restante</th>
+                    <th className="p-4 text-center">Condición de Solvencia</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dataResidentesFiltrada.length === 0 ? (
+                    <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Ningún registro coincide con los filtros aplicados.</td></tr>
+                  ) : (
+                    dataResidentesFiltrada.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-4 text-center font-mono font-bold text-slate-500">Piso {item.piso}</td>
+                        <td className="p-4 font-bold text-emerald-900 tracking-wide">{item.apartamento}</td>
+                        <td className="p-4">
+                          <span className="font-semibold text-slate-700">{item.mes_correspondiente}</span> <span className="font-mono text-slate-400">{item.anio_correspondiente}</span>
+                        </td>
+                        <td className="p-4 text-right font-mono font-bold text-emerald-600">${formatMoney(item.monto_pagado_usd)}</td>
+                        <td className="p-4 text-right font-mono font-bold text-red-600">${formatMoney(item.deuda_acumulada_usd)}</td>
+                        <td className="p-4 text-center">
+                          <span className={`px-3 py-1 rounded-full text-[9px] font-bold tracking-widest border ${item.estatus_solvencia === 'SOLVENTE' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                            {item.estatus_solvencia}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

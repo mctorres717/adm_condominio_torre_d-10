@@ -31,9 +31,8 @@ export default function FinanzasTorreD10() {
     gasto_bs: ''
   });
 
-  // --- 1. PERSISTENCIA DE SESIÓN Y AUTO-CIERRE ---
+  // --- PERSISTENCIA DE SESIÓN Y AUTO-CIERRE ---
   useEffect(() => {
-    // Verificar si hay sesión activa al refrescar la página
     if (typeof window !== 'undefined') {
       const savedAuth = localStorage.getItem('finanzasAuth');
       if (savedAuth === 'true') {
@@ -56,7 +55,6 @@ export default function FinanzasTorreD10() {
       }, 5 * 60 * 1000);
     };
 
-    // Escuchar cualquier interacción
     const userEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
     userEvents.forEach(event => window.addEventListener(event, resetInactivityTimer));
 
@@ -68,7 +66,7 @@ export default function FinanzasTorreD10() {
     };
   }, [isAuth]);
 
-  // --- 2. CARGA DE DATOS DE SUPABASE ---
+  // --- CARGA DE DATOS DE SUPABASE ---
   useEffect(() => {
     if (isAuth) {
       fetchTransacciones();
@@ -101,10 +99,10 @@ export default function FinanzasTorreD10() {
     }
   };
 
-  // --- 3. FUNCIONES DE CONTROL ---
+  // --- FUNCIONES DE CONTROL ---
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === 'admin') { // CLAVE ACTUALIZADA
+    if (pin === 'admin') { 
       setIsAuth(true);
       if (typeof window !== 'undefined') {
         localStorage.setItem('finanzasAuth', 'true');
@@ -150,7 +148,6 @@ export default function FinanzasTorreD10() {
     }
   };
 
-  // --- FUNCIÓN DE IMPRESIÓN (PARA PESTAÑAS 2 Y 5) ---
   const handlePrint = (tituloArchivo: string) => {
     const tituloOriginal = document.title;
     document.title = tituloArchivo;
@@ -158,8 +155,15 @@ export default function FinanzasTorreD10() {
     setTimeout(() => { document.title = tituloOriginal; }, 1000);
   };
 
-  // --- 4. MOTOR MATEMÁTICO DEL DASHBOARD ---
-  // Esto soluciona los errores que te arrojaba. Las variables están dentro del componente.
+  // --- HELPER: FORMATEO DE MONEDA (NOMENCLATURA INTERNACIONAL) ---
+  const formatMoney = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(amount);
+  };
+
+  // --- MOTOR MATEMÁTICO DEL DASHBOARD ---
   const totalIngresoUSD = transacciones.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
   const totalGastoUSD = transacciones.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
   const saldoActualUSD = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_usd : 0;
@@ -168,7 +172,7 @@ export default function FinanzasTorreD10() {
   const totalGastoBs = transacciones.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
   const saldoActualBs = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_bs : 0;
 
-  // --- 5. INTERFAZ DE LOGIN ---
+  // --- INTERFAZ DE LOGIN ---
   if (!isAuth) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
@@ -187,11 +191,10 @@ export default function FinanzasTorreD10() {
     );
   }
 
-  // --- 6. INTERFAZ PRINCIPAL DEL SISTEMA ---
+  // --- INTERFAZ PRINCIPAL ---
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased pb-12 print:bg-white print:text-black print:p-0">
       
-      {/* CSS DE IMPRESIÓN */}
       <style>{`
         @media print {
           @page { size: letter portrait; margin: 2cm; }
@@ -250,26 +253,40 @@ export default function FinanzasTorreD10() {
       {/* ÁREA DE CONTENIDO DINÁMICO */}
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8 animate-fadeIn">
         
-        {/* PESTAÑA 1: RESUMEN FINANZAS */}
+        {/* PESTAÑA 1: RESUMEN FINANZAS (DIVIDIDO EN USD Y BS CON NUEVA NOMENCLATURA) */}
         {activeTab === 'RESUMEN' && (
           <div className="no-print space-y-6">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Resumen Financiero Consolidado</h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-emerald-600 flex flex-col justify-between">
+            
+            {/* BLOQUE DIVISAS (USD) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+              <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-emerald-600">
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Total Ingresos USD</p>
-                <p className="text-3xl font-mono font-bold text-emerald-900">${totalIngresoUSD.toFixed(2)}</p>
+                <p className="text-3xl font-mono font-bold text-emerald-900">${formatMoney(totalIngresoUSD)}</p>
               </div>
-              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-red-600 flex flex-col justify-between">
+              <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-red-600">
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Total Gastos USD</p>
-                <p className="text-3xl font-mono font-bold text-red-900">${totalGastoUSD.toFixed(2)}</p>
+                <p className="text-3xl font-mono font-bold text-red-900">${formatMoney(totalGastoUSD)}</p>
               </div>
-              <div className="bg-emerald-950 p-6 rounded-xl shadow-lg border-t-4 border-emerald-400 flex flex-col justify-between">
+              <div className="bg-emerald-950 p-6 rounded-xl shadow-xl border-t-4 border-emerald-400">
                 <p className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold mb-1">Saldo Actual USD</p>
-                <p className="text-4xl font-mono font-bold text-white">${saldoActualUSD.toFixed(2)}</p>
+                <p className="text-4xl font-mono font-bold text-white">${formatMoney(saldoActualUSD)}</p>
               </div>
-              <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-amber-500 flex flex-col justify-between">
+            </div>
+
+            {/* BLOQUE BOLÍVARES (BS) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-emerald-500">
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Total Ingresos Bs</p>
+                <p className="text-3xl font-mono font-bold text-emerald-700">Bs {formatMoney(totalIngresoBs)}</p>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-red-500">
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Total Gastos Bs</p>
+                <p className="text-3xl font-mono font-bold text-red-700">Bs {formatMoney(totalGastoBs)}</p>
+              </div>
+              <div className="bg-white p-6 rounded-xl shadow-md border-t-4 border-amber-500">
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">Saldo Actual Bs</p>
-                <p className="text-4xl font-mono font-bold text-amber-600">Bs {saldoActualBs.toFixed(2)}</p>
+                <p className="text-4xl font-mono font-bold text-amber-600">Bs {formatMoney(saldoActualBs)}</p>
               </div>
             </div>
           </div>
@@ -289,10 +306,9 @@ export default function FinanzasTorreD10() {
             </div>
             
             <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí integraremos el buscador híbrido para ver deudas históricas y pagos realizados.</p>
+               <p className="text-slate-500">Aquí integraremos el buscador de apartamentos en la siguiente fase para reflejar los pagos históricos de la pestaña 3.</p>
             </div>
 
-            {/* ÁREA DE IMPRESIÓN (OCULTA HASTA QUE SE IMPRIMA) */}
             <div className="print-area hidden print:block bg-white text-black p-8 font-serif">
               <h1 className="text-center text-2xl font-bold mb-6 underline">ESTADO DE CUENTA - TORRE D-10</h1>
               <p>Aquí se renderizará el formato oficial de cobro/solvencia para entregar al propietario.</p>
@@ -305,7 +321,7 @@ export default function FinanzasTorreD10() {
           <div className="no-print space-y-6">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Master Ledger (Libro Mayor de Residentes)</h2>
             <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí colocaremos los 4 filtros (Fecha, Mes, Piso, Apto) conectados a Supabase.</p>
+               <p className="text-slate-500">Aquí se programará la inserción masiva y los 4 filtros avanzados.</p>
             </div>
           </div>
         )}
@@ -316,7 +332,7 @@ export default function FinanzasTorreD10() {
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Libro Diario de Transacciones</h2>
             
             <form onSubmit={handleRegistrarMovimiento} className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Registrar Nuevo Movimiento</h3>
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Registrar Nuevo Movimiento Manual</h3>
               
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <input type="text" placeholder="Año (Ej. 2026)" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" required />
@@ -324,7 +340,7 @@ export default function FinanzasTorreD10() {
                   <option value="">-- Mes --</option>
                   {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
-                <input type="text" placeholder="Referencia (Ej. Zelle 1234)" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" />
+                <input type="text" placeholder="Referencia (Ej. Factura 102)" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" />
                 <input type="text" placeholder="Descripción del Gasto/Ingreso" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" required />
               </div>
 
@@ -381,12 +397,12 @@ export default function FinanzasTorreD10() {
                             <div className="font-medium text-slate-800">{t.descripcion}</div>
                             <div className="text-[10px] text-slate-400 font-mono">Ref: {t.referencia}</div>
                           </td>
-                          <td className="p-4 text-right font-mono text-emerald-600">{Number(t.ingreso_usd) > 0 ? `+${t.ingreso_usd}` : '-'}</td>
-                          <td className="p-4 text-right font-mono text-red-600">{Number(t.gasto_usd) > 0 ? `-${t.gasto_usd}` : '-'}</td>
-                          <td className="p-4 text-right font-mono font-bold border-r border-slate-100 bg-slate-50">{t.saldo_usd.toFixed(2)}</td>
-                          <td className="p-4 text-right font-mono text-emerald-600">{Number(t.ingreso_bs) > 0 ? `+${t.ingreso_bs}` : '-'}</td>
-                          <td className="p-4 text-right font-mono text-red-600">{Number(t.gasto_bs) > 0 ? `-${t.gasto_bs}` : '-'}</td>
-                          <td className="p-4 text-right font-mono font-bold bg-slate-50">{t.saldo_bs.toFixed(2)}</td>
+                          <td className="p-4 text-right font-mono text-emerald-600">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono text-red-600">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono font-bold border-r border-slate-100 bg-slate-50">{formatMoney(t.saldo_usd)}</td>
+                          <td className="p-4 text-right font-mono text-emerald-600">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono text-red-600">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono font-bold bg-slate-50">{formatMoney(t.saldo_bs)}</td>
                         </tr>
                       ))
                     )}
@@ -410,10 +426,9 @@ export default function FinanzasTorreD10() {
             </div>
             
             <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-               <p className="text-slate-500">Aquí irá el filtro por mes para agrupar los gastos de la Pestaña 4.</p>
+               <p className="text-slate-500">Aquí se reflejará el cierre mensual agrupado de los gastos operativos.</p>
             </div>
 
-            {/* ÁREA DE IMPRESIÓN */}
             <div className="print-area hidden print:block bg-white text-black p-8 font-serif">
               <h1 className="text-center text-2xl font-bold mb-6 underline">CIERRE CONTABLE - TORRE D-10</h1>
               <p>Aquí se renderizará la tabla filtrada por mes con las 8 columnas requeridas para imprimir.</p>

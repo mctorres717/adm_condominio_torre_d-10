@@ -18,16 +18,19 @@ export default function FinanzasTorreD10() {
   const [transacciones, setTransacciones] = useState<any[]>([]);
   const [pagosResidentes, setPagosResidentes] = useState<any[]>([]);
 
-  // PESTAÑA 4: Formulario exclusivo para GASTOS
-  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
-  
-  // PESTAÑA 3: Formulario con descripción y arreglo de meses
+  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' });
   const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', meses_seleccionados: [] as string[], anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', descripcion: '' });
 
+  // Filtros Pestaña 3
   const [filtroAnio, setFiltroAnio] = useState('');
   const [filtroMes, setFiltroMes] = useState('');
   const [filtroPiso, setFiltroPiso] = useState('');
   const [filtroApto, setFiltroApto] = useState('');
+
+  // Filtros Pestaña 2 y 5
+  const [filtroAptoTab2, setFiltroAptoTab2] = useState('');
+  const [filtroMesTab5, setFiltroMesTab5] = useState('');
+  const [filtroAnioTab5, setFiltroAnioTab5] = useState(new Date().getFullYear().toString());
 
   const listaApartamentos = Array.from({ length: 14 }, (_, p) => ['A', 'B', 'C', 'D'].map(letra => `${p + 1}-${letra}`)).flat();
   const mesesDelAno = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -66,7 +69,7 @@ export default function FinanzasTorreD10() {
   };
 
   const fetchPagosResidentes = async () => {
-    const { data } = await supabase.from('pagos_residentes').select('*').order('piso', { ascending: true }).order('apartamento', { ascending: true });
+    const { data } = await supabase.from('pagos_residentes').select('*').order('created_at', { ascending: true });
     if (data) setPagosResidentes(data);
   };
 
@@ -78,35 +81,18 @@ export default function FinanzasTorreD10() {
 
   const handleLogout = () => { setIsAuth(false); setPin(''); if (typeof window !== 'undefined') localStorage.removeItem('finanzasAuth'); };
 
-  // --- REGISTRO DE GASTOS (PESTAÑA 4) ---
   const handleRegistrarMovimiento = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formGasto.anio || !formGasto.mes || !formGasto.descripcion) return alert("Año, Mes y Descripción son obligatorios.");
-    
-    // Solo se envían gastos (Ingresos van en 0 por defecto)
-    const payload = { 
-      fecha: new Date().toISOString(), 
-      anio: formGasto.anio, 
-      mes: formGasto.mes, 
-      referencia: formGasto.referencia || 'N/A', 
-      descripcion: formGasto.descripcion, 
-      ingreso_usd: 0, 
-      gasto_usd: Number(formGasto.gasto_usd) || 0, 
-      ingreso_bs: 0, 
-      gasto_bs: Number(formGasto.gasto_bs) || 0 
-    };
-    
+    const payload = { fecha: new Date().toISOString(), anio: formGasto.anio, mes: formGasto.mes, referencia: formGasto.referencia || 'N/A', descripcion: formGasto.descripcion, ingreso_usd: 0, gasto_usd: Number(formGasto.gasto_usd)||0, ingreso_bs: 0, gasto_bs: Number(formGasto.gasto_bs)||0 };
     const { error } = await supabase.from('finanzas_d10').insert([payload]);
     if (error) alert(`Error: ${error.message}`);
-    else { alert("✅ Gasto registrado en el Libro Diario."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
+    else { alert("✅ Gasto registrado en el Libro Diario."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' }); fetchTransacciones(); }
   };
 
-  // --- REGISTRO DE RECAUDACIÓN (PESTAÑA 3) Y AUTO-SINCRONIZACIÓN AL LIBRO DIARIO ---
   const handleRegistrarPagoResidente = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formPagoResidente.apartamento || formPagoResidente.meses_seleccionados.length === 0) {
-      return alert("Por favor selecciona el Apartamento y al menos un Mes.");
-    }
+    if (!formPagoResidente.apartamento || formPagoResidente.meses_seleccionados.length === 0) return alert("Selecciona el Apartamento y al menos un Mes.");
 
     const pisoCalculado = formPagoResidente.apartamento.split('-')[0];
     const mUSD = Number(formPagoResidente.monto_pagado_usd) || 0;
@@ -114,53 +100,31 @@ export default function FinanzasTorreD10() {
     const estatusCalculado = (mUSD > 0 || mBS > 0) ? 'PAGADO' : 'PENDIENTE';
     const mesesUnidos = formPagoResidente.meses_seleccionados.join(', ');
 
-    // 1. Guardar en Base de Datos de Residentes
     const payloadResidente = {
-      apartamento: formPagoResidente.apartamento,
-      piso: pisoCalculado,
-      mes_correspondiente: mesesUnidos,
-      anio_correspondiente: formPagoResidente.anio_correspondiente,
-      monto_pagado_usd: mUSD,
-      monto_pagado_bs: mBS,
-      estatus_solvencia: estatusCalculado,
-      descripcion: formPagoResidente.descripcion || `Abono de condominio`
+      apartamento: formPagoResidente.apartamento, piso: pisoCalculado, mes_correspondiente: mesesUnidos, anio_correspondiente: formPagoResidente.anio_correspondiente,
+      monto_pagado_usd: mUSD, monto_pagado_bs: mBS, estatus_solvencia: estatusCalculado, descripcion: formPagoResidente.descripcion || `Abono de condominio`
     };
 
     const { error: errorResidente } = await supabase.from('pagos_residentes').insert([payloadResidente]);
-    
-    if (errorResidente) {
-      return alert(`Error en Residentes: ${errorResidente.message}`);
-    }
+    if (errorResidente) return alert(`Error en Residentes: ${errorResidente.message}`);
 
-    // 2. Sincronización Automática al Libro Diario (Pestaña 4)
     if (mUSD > 0 || mBS > 0) {
       const payloadLibroDiario = {
-        fecha: new Date().toISOString(),
-        anio: formPagoResidente.anio_correspondiente,
-        mes: formPagoResidente.meses_seleccionados[formPagoResidente.meses_seleccionados.length - 1], // Usa el último mes seleccionado como referencia temporal
-        referencia: `Apto ${formPagoResidente.apartamento}`,
-        descripcion: `Ingreso Condominio: ${formPagoResidente.descripcion || mesesUnidos}`,
-        ingreso_usd: mUSD,
-        gasto_usd: 0,
-        ingreso_bs: mBS,
-        gasto_bs: 0
+        fecha: new Date().toISOString(), anio: formPagoResidente.anio_correspondiente, mes: formPagoResidente.meses_seleccionados[formPagoResidente.meses_seleccionados.length - 1],
+        referencia: `Apto ${formPagoResidente.apartamento}`, descripcion: `Ingreso Condominio: ${formPagoResidente.descripcion || mesesUnidos}`,
+        ingreso_usd: mUSD, gasto_usd: 0, ingreso_bs: mBS, gasto_bs: 0
       };
-      
       await supabase.from('finanzas_d10').insert([payloadLibroDiario]);
     }
 
-    alert(`✅ Abono registrado. Libro Mayor actualizado automáticamente.`);
+    alert(`✅ Abono registrado. Libro Mayor actualizado.`);
     setFormPagoResidente({ apartamento: '', meses_seleccionados: [], anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', descripcion: '' });
-    fetchPagosResidentes();
-    fetchTransacciones(); // Actualiza los saldos del Dashboard y Pestaña 4
+    fetchPagosResidentes(); fetchTransacciones();
   };
 
   const toggleMes = (mes: string) => {
     setFormPagoResidente(prev => {
-      const seleccionados = prev.meses_seleccionados.includes(mes)
-        ? prev.meses_seleccionados.filter(m => m !== mes)
-        : [...prev.meses_seleccionados, mes];
-      // Ordenar meses cronológicamente
+      const seleccionados = prev.meses_seleccionados.includes(mes) ? prev.meses_seleccionados.filter(m => m !== mes) : [...prev.meses_seleccionados, mes];
       seleccionados.sort((a, b) => mesesDelAno.indexOf(a) - mesesDelAno.indexOf(b));
       return { ...prev, meses_seleccionados: seleccionados };
     });
@@ -169,6 +133,7 @@ export default function FinanzasTorreD10() {
   const handlePrint = (titulo: string) => { const original = document.title; document.title = titulo; window.print(); setTimeout(() => { document.title = original; }, 1000); };
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
+  // Matemáticas Dashboard
   const totalIngresoUSD = transacciones.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
   const totalGastoUSD = transacciones.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
   const saldoActualUSD = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_usd : 0;
@@ -176,12 +141,23 @@ export default function FinanzasTorreD10() {
   const totalGastoBs = transacciones.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
   const saldoActualBs = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_bs : 0;
 
+  // Lógicas de Filtrado
   const dataResidentesFiltrada = pagosResidentes.filter(p => {
     return (filtroAnio === '' || p.anio_correspondiente.toLowerCase().includes(filtroAnio.toLowerCase())) &&
            (filtroMes === '' || p.mes_correspondiente.includes(filtroMes)) &&
            (filtroPiso === '' || p.piso.toString().toLowerCase().includes(filtroPiso.toLowerCase())) &&
            (filtroApto === '' || p.apartamento.toLowerCase().includes(filtroApto.toLowerCase()));
   });
+
+  const historialApto = pagosResidentes.filter(p => p.apartamento === filtroAptoTab2);
+  const totalAptoUSD = historialApto.reduce((acc, p) => acc + Number(p.monto_pagado_usd), 0);
+  const totalAptoBs = historialApto.reduce((acc, p) => acc + Number(p.monto_pagado_bs), 0);
+
+  const transaccionesMesTab5 = transacciones.filter(t => t.mes === filtroMesTab5 && t.anio === filtroAnioTab5);
+  const mesIngresoUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
+  const mesGastoUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
+  const mesIngresoBs = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_bs), 0);
+  const mesGastoBs = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
 
   if (!isAuth) {
     return (
@@ -199,7 +175,7 @@ export default function FinanzasTorreD10() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased pb-12 print:bg-white print:text-black print:p-0">
-      <style>{`@media print { @page { size: letter portrait; margin: 2cm; } .no-print { display: none !important; } body { background-color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .print-area { box-shadow: none !important; margin: 0 !important; padding: 0 !important; width: 100% !important; border: none !important; } }`}</style>
+      <style>{`@media print { @page { size: letter portrait; margin: 1cm; } .no-print { display: none !important; } body { background-color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .print-area { box-shadow: none !important; margin: 0 !important; padding: 0 !important; width: 100% !important; border: none !important; } }`}</style>
       <header className="no-print bg-emerald-950 border-b-4 border-emerald-700 py-4 px-6 shadow-xl sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex flex-col gap-5">
           <div className="flex items-center justify-between w-full">
@@ -216,6 +192,7 @@ export default function FinanzasTorreD10() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8 animate-fadeIn">
+        {/* PESTAÑA 1 */}
         {activeTab === 'RESUMEN' && (
           <div className="no-print space-y-6">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Resumen Financiero Consolidado</h2>
@@ -232,66 +209,92 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
+        {/* PESTAÑA 2: ESTADO DE CUENTA */}
         {activeTab === 'BUSQUEDA' && (
           <div className="space-y-6">
-            <div className="no-print flex justify-between items-center border-b border-slate-300 pb-2"><h2 className="text-2xl font-bold text-emerald-950">Estado de Cuenta por Apartamento</h2><button onClick={() => handlePrint("Estado de Cuenta - Apto")} className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md text-xs uppercase tracking-widest transition-colors flex items-center gap-2">🖨️ Imprimir Estado</button></div>
-            <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200"><p className="text-slate-500">Aquí se programará el buscador dinámico cruzado con la data de la pestaña 3.</p></div>
-            <div className="print-area hidden print:block bg-white text-black p-8 font-serif"><h1 className="text-center text-2xl font-bold mb-6 underline">ESTADO DE CUENTA - TORRE D-10</h1><p>Aquí se renderizará el formato oficial.</p></div>
+            <div className="no-print flex justify-between items-center border-b border-slate-300 pb-2">
+              <h2 className="text-2xl font-bold text-emerald-950">Estado de Cuenta por Apartamento</h2>
+              {filtroAptoTab2 && (
+                <button onClick={() => handlePrint(`Estado de Cuenta - Apto ${filtroAptoTab2}`)} className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md text-xs uppercase tracking-widest transition-colors flex items-center gap-2">🖨️ Imprimir Estado</button>
+              )}
+            </div>
+            
+            <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200 flex gap-4 items-end">
+               <div className="w-1/3">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Seleccione Apartamento</label>
+                  <select value={filtroAptoTab2} onChange={e => setFiltroAptoTab2(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white font-bold text-emerald-900 focus:outline-none focus:border-emerald-500">
+                    <option value="">-- Buscar Apto --</option>
+                    {listaApartamentos.map(apto => <option key={apto} value={apto}>{apto}</option>)}
+                  </select>
+               </div>
+            </div>
+
+            {filtroAptoTab2 && (
+              <div className="print-area bg-white p-8 rounded-xl shadow-lg border border-slate-200">
+                <div className="border-b-2 border-emerald-900 pb-6 mb-6 flex justify-between items-center">
+                  <div>
+                    <h1 className="text-3xl font-bold text-emerald-950 tracking-widest">TORRE D-10</h1>
+                    <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">Reporte de Estado de Cuenta</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-emerald-900">APTO {filtroAptoTab2}</p>
+                    <p className="text-xs text-slate-500 font-mono mt-1">Emitido: {new Date().toLocaleDateString()}</p>
+                  </div>
+                </div>
+
+                <table className="w-full text-left text-sm whitespace-nowrap mb-8">
+                  <thead className="bg-emerald-50 text-emerald-900 font-bold uppercase text-[10px] tracking-wider border-y-2 border-emerald-900">
+                    <tr><th className="p-3">Fecha de Registro</th><th className="p-3">Meses Cancelados</th><th className="p-3">Descripción</th><th className="p-3 text-right">Abono USD</th><th className="p-3 text-right">Abono Bs</th><th className="p-3 text-center">Estatus</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {historialApto.length === 0 ? (<tr><td colSpan={6} className="p-8 text-center text-slate-400">Sin registros de pago encontrados para el Apto {filtroAptoTab2}.</td></tr>) : (
+                      historialApto.map((p) => (
+                        <tr key={p.id}>
+                          <td className="p-3 text-xs text-slate-500 font-mono">{new Date(p.created_at).toLocaleDateString()}</td>
+                          <td className="p-3 font-semibold text-slate-800">{p.mes_correspondiente} {p.anio_correspondiente}</td>
+                          <td className="p-3 text-slate-600 truncate max-w-[200px]">{p.descripcion}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">${formatMoney(p.monto_pagado_usd)}</td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700">Bs {formatMoney(p.monto_pagado_bs)}</td>
+                          <td className="p-3 text-center"><span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{p.estatus_solvencia}</span></td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+
+                <div className="flex justify-end gap-8 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                   <div className="text-right">
+                     <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total Histórico USD</p>
+                     <p className="text-2xl font-mono font-bold text-emerald-900">${formatMoney(totalAptoUSD)}</p>
+                   </div>
+                   <div className="text-right">
+                     <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total Histórico Bs</p>
+                     <p className="text-2xl font-mono font-bold text-emerald-900">Bs {formatMoney(totalAptoBs)}</p>
+                   </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
+        {/* PESTAÑA 3 */}
         {activeTab === 'BASE_DATOS' && (
           <div className="no-print space-y-6 animate-fadeIn">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Master Ledger de Residentes</h2>
-            
             <form onSubmit={handleRegistrarPagoResidente} className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
               <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Cargar Pago de Condominio</h3>
-              
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-4 items-start">
-                <div className="md:col-span-3">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Apartamento</label>
-                  <select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white font-semibold focus:outline-none focus:border-emerald-500" required>
-                    <option value="">-- Seleccionar --</option>
-                    {listaApartamentos.map(apto => <option key={apto} value={apto}>{apto}</option>)}
-                  </select>
-                </div>
-                
-                <div className="md:col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Año</label>
-                  <input type="text" value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" required />
-                </div>
-
-                <div className="md:col-span-7">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Meses a Cancelar (Selección Múltiple)</label>
-                  <div className="grid grid-cols-3 lg:grid-cols-4 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
-                    {mesesDelAno.map(mes => (
-                      <label key={mes} className="flex items-center space-x-2 text-xs font-medium cursor-pointer text-slate-700 hover:text-emerald-700">
-                        <input type="checkbox" checked={formPagoResidente.meses_seleccionados.includes(mes)} onChange={() => toggleMes(mes)} className="accent-emerald-600 w-3 h-3" />
-                        <span>{mes}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Apartamento</label><select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white font-semibold focus:outline-none focus:border-emerald-500" required><option value="">-- Seleccionar --</option>{listaApartamentos.map(apto => <option key={apto} value={apto}>{apto}</option>)}</select></div>
+                <div className="md:col-span-2"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Año</label><input type="text" value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" required /></div>
+                <div className="md:col-span-7"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Meses a Cancelar (Selección Múltiple)</label><div className="grid grid-cols-3 lg:grid-cols-4 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">{mesesDelAno.map(mes => (<label key={mes} className="flex items-center space-x-2 text-xs font-medium cursor-pointer text-slate-700 hover:text-emerald-700"><input type="checkbox" checked={formPagoResidente.meses_seleccionados.includes(mes)} onChange={() => toggleMes(mes)} className="accent-emerald-600 w-3 h-3" /><span>{mes}</span></label>))}</div></div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
-                <div className="md:col-span-3">
-                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono USD</label>
-                  <input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
-                </div>
-                <div className="md:col-span-3">
-                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono Bs.</label>
-                  <input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
-                </div>
-                <div className="md:col-span-6">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descripción del Pago</label>
-                  <input type="text" placeholder="Ej. Pago por Zelle #1234..." value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" />
-                </div>
+                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono" /></div>
+                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono Bs.</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono" /></div>
+                <div className="md:col-span-6"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descripción del Pago</label><input type="text" placeholder="Ej. Pago por Zelle #1234..." value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm" /></div>
               </div>
-
-              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs transition-transform active:scale-95">💾 Registrar Recaudación</button></div>
+              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs">💾 Registrar Recaudación</button></div>
             </form>
-
             <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200">
               <p className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-3">Filtros de Auditoría Avanzada</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -301,7 +304,6 @@ export default function FinanzasTorreD10() {
                 <input type="text" placeholder="🔍 Filtrar por Apartamento" value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 uppercase font-bold text-emerald-800" />
               </div>
             </div>
-
             <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead className="bg-slate-900 text-white font-mono uppercase text-[10px] tracking-wider"><tr><th className="p-4 text-center">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Meses Abonados</th><th className="p-4">Descripción</th><th className="p-4 text-right bg-emerald-950/20">Abono USD</th><th className="p-4 text-right bg-emerald-950/20">Abono Bs.</th><th className="p-4 text-center">Condición</th></tr></thead>
@@ -317,6 +319,7 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
+        {/* PESTAÑA 4 */}
         {activeTab === 'GASTOS_GRAL' && (
           <div className="no-print space-y-6 animate-fadeIn">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Libro Diario de Egresos Operativos</h2>
@@ -349,11 +352,82 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
+        {/* PESTAÑA 5: CIERRE MENSUAL */}
         {activeTab === 'GASTOS_MENSUAL' && (
           <div className="space-y-6">
-            <div className="no-print flex justify-between items-center border-b border-slate-300 pb-2"><h2 className="text-2xl font-bold text-emerald-950">Cierre Contable Mensual</h2><button onClick={() => handlePrint("Relación de Gastos - Mensual")} className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md text-xs uppercase tracking-widest transition-colors flex items-center gap-2">🖨️ Imprimir Cierre</button></div>
-            <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200"><p className="text-slate-500">Aquí se reflejará el cierre mensual agrupado de los gastos operativos.</p></div>
-            <div className="print-area hidden print:block bg-white text-black p-8 font-serif"><h1 className="text-center text-2xl font-bold mb-6 underline">CIERRE CONTABLE - TORRE D-10</h1><p>Aquí se renderizará la tabla filtrada por mes con las 8 columnas requeridas para imprimir.</p></div>
+            <div className="no-print flex justify-between items-center border-b border-slate-300 pb-2">
+              <h2 className="text-2xl font-bold text-emerald-950">Cierre Contable Mensual</h2>
+              {filtroMesTab5 && (
+                <button onClick={() => handlePrint(`Cierre Mensual - ${filtroMesTab5} ${filtroAnioTab5}`)} className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md text-xs uppercase tracking-widest transition-colors flex items-center gap-2">🖨️ Imprimir Cierre</button>
+              )}
+            </div>
+            
+            <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200 flex gap-4 items-end">
+               <div className="w-1/4">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar por Año</label>
+                  <input type="text" value={filtroAnioTab5} onChange={e => setFiltroAnioTab5(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white font-mono focus:outline-none focus:border-emerald-500" />
+               </div>
+               <div className="w-1/3">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar por Mes</label>
+                  <select value={filtroMesTab5} onChange={e => setFiltroMesTab5(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white font-bold text-emerald-900 focus:outline-none focus:border-emerald-500">
+                    <option value="">-- Seleccione Mes --</option>
+                    {mesesDelAno.map(mes => <option key={mes} value={mes}>{mes}</option>)}
+                  </select>
+               </div>
+            </div>
+
+            {filtroMesTab5 && (
+              <div className="print-area bg-white p-8 rounded-xl shadow-lg border border-slate-200">
+                <div className="border-b-2 border-emerald-900 pb-6 mb-6 flex justify-between items-center">
+                  <div>
+                    <h1 className="text-3xl font-bold text-emerald-950 tracking-widest">TORRE D-10</h1>
+                    <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">Cierre de Flujo de Caja</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-emerald-900 uppercase">{filtroMesTab5} {filtroAnioTab5}</p>
+                    <p className="text-xs text-slate-500 font-mono mt-1">Generado: {new Date().toLocaleDateString()}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6 mb-8">
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-200 pb-1">Balance Operativo USD</p>
+                    <div className="flex justify-between text-sm mb-1"><span className="text-slate-600">Total Ingresos:</span><span className="font-mono text-emerald-600 font-bold">+${formatMoney(mesIngresoUSD)}</span></div>
+                    <div className="flex justify-between text-sm mb-2"><span className="text-slate-600">Total Egresos:</span><span className="font-mono text-red-600 font-bold">-${formatMoney(mesGastoUSD)}</span></div>
+                    <div className="flex justify-between text-base border-t border-slate-200 pt-2"><span className="font-bold text-slate-800">Neto Mensual:</span><span className={`font-mono font-bold ${mesIngresoUSD - mesGastoUSD >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>${formatMoney(mesIngresoUSD - mesGastoUSD)}</span></div>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-200 pb-1">Balance Operativo Bs.</p>
+                    <div className="flex justify-between text-sm mb-1"><span className="text-slate-600">Total Ingresos:</span><span className="font-mono text-emerald-600 font-bold">+Bs {formatMoney(mesIngresoBs)}</span></div>
+                    <div className="flex justify-between text-sm mb-2"><span className="text-slate-600">Total Egresos:</span><span className="font-mono text-red-600 font-bold">-Bs {formatMoney(mesGastoBs)}</span></div>
+                    <div className="flex justify-between text-base border-t border-slate-200 pt-2"><span className="font-bold text-slate-800">Neto Mensual:</span><span className={`font-mono font-bold ${mesIngresoBs - mesGastoBs >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>Bs {formatMoney(mesIngresoBs - mesGastoBs)}</span></div>
+                  </div>
+                </div>
+
+                <h3 className="text-sm font-bold text-emerald-900 uppercase tracking-widest mb-3">Detalle de Movimientos</h3>
+                <table className="w-full text-left text-[11px] whitespace-nowrap">
+                  <thead className="bg-emerald-50 text-emerald-900 font-bold uppercase tracking-wider border-y border-emerald-900">
+                    <tr><th className="p-2">Fecha/ID</th><th className="p-2">Descripción</th><th className="p-2 text-right">Ingreso $</th><th className="p-2 text-right">Egreso $</th><th className="p-2 text-right border-r border-emerald-200">Saldo $</th><th className="p-2 text-right">Ingreso Bs</th><th className="p-2 text-right">Egreso Bs</th><th className="p-2 text-right">Saldo Bs</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {transaccionesMesTab5.length === 0 ? (<tr><td colSpan={8} className="p-8 text-center text-slate-400">Sin movimientos registrados en este periodo.</td></tr>) : (
+                      transaccionesMesTab5.map((t) => (
+                        <tr key={t.id}>
+                          <td className="p-2 text-slate-500 font-mono">#{t.id}</td>
+                          <td className="p-2 text-slate-800 font-medium truncate max-w-[200px]">{t.descripcion}</td>
+                          <td className="p-2 text-right font-mono text-emerald-600">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
+                          <td className="p-2 text-right font-mono text-red-600">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td>
+                          <td className="p-2 text-right font-mono font-bold border-r border-emerald-50">{formatMoney(t.saldo_usd)}</td>
+                          <td className="p-2 text-right font-mono text-emerald-600">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
+                          <td className="p-2 text-right font-mono text-red-600">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
+                          <td className="p-2 text-right font-mono font-bold">{formatMoney(t.saldo_bs)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </main>

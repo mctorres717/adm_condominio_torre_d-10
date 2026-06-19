@@ -1,14 +1,20 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
+// --- CONEXIÓN A SUPABASE ---
 const supabase = createClient(
   'https://spdhfslvbslsuuzckmqr.supabase.co',
   'sb_publishable_DH68PA1DWbc66PALwVDyXA_dHLQPrL1'
 );
 
 type TabType = 'RESUMEN' | 'BUSQUEDA' | 'BASE_DATOS' | 'GASTOS_GRAL' | 'GASTOS_MENSUAL';
+
+// --- CONSTANTES DEL NEGOCIO ---
+const CUOTA_MENSUAL_USD = 10.00;
+const ANO_INICIO_OPERACIONES = 2025;
+const MES_INICIO_OPERACIONES = 0; // 0 = Enero en JavaScript
 
 export default function FinanzasTorreD10() {
   const [isAuth, setIsAuth] = useState(false);
@@ -18,16 +24,18 @@ export default function FinanzasTorreD10() {
   const [transacciones, setTransacciones] = useState<any[]>([]);
   const [pagosResidentes, setPagosResidentes] = useState<any[]>([]);
 
-  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' });
+  // PESTAÑA 4: GASTOS
+  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
+  
+  // PESTAÑA 3: RECAUDACIÓN
   const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', meses_seleccionados: [] as string[], anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', descripcion: '' });
 
-  // Filtros Pestaña 3
+  // FILTROS
   const [filtroAnio, setFiltroAnio] = useState('');
   const [filtroMes, setFiltroMes] = useState('');
   const [filtroPiso, setFiltroPiso] = useState('');
   const [filtroApto, setFiltroApto] = useState('');
 
-  // Filtros Pestaña 2 y 5
   const [filtroAptoTab2, setFiltroAptoTab2] = useState('');
   const [filtroMesTab5, setFiltroMesTab5] = useState('');
   const [filtroAnioTab5, setFiltroAnioTab5] = useState(new Date().getFullYear().toString());
@@ -87,7 +95,7 @@ export default function FinanzasTorreD10() {
     const payload = { fecha: new Date().toISOString(), anio: formGasto.anio, mes: formGasto.mes, referencia: formGasto.referencia || 'N/A', descripcion: formGasto.descripcion, ingreso_usd: 0, gasto_usd: Number(formGasto.gasto_usd)||0, ingreso_bs: 0, gasto_bs: Number(formGasto.gasto_bs)||0 };
     const { error } = await supabase.from('finanzas_d10').insert([payload]);
     if (error) alert(`Error: ${error.message}`);
-    else { alert("✅ Gasto registrado en el Libro Diario."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' }); fetchTransacciones(); }
+    else { alert("✅ Gasto registrado en el Libro Diario."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
   };
 
   const handleRegistrarPagoResidente = async (e: React.FormEvent) => {
@@ -133,7 +141,7 @@ export default function FinanzasTorreD10() {
   const handlePrint = (titulo: string) => { const original = document.title; document.title = titulo; window.print(); setTimeout(() => { document.title = original; }, 1000); };
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
-  // Matemáticas Dashboard
+  // --- MATEMÁTICAS DASHBOARD ---
   const totalIngresoUSD = transacciones.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
   const totalGastoUSD = transacciones.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
   const saldoActualUSD = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_usd : 0;
@@ -141,17 +149,85 @@ export default function FinanzasTorreD10() {
   const totalGastoBs = transacciones.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
   const saldoActualBs = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_bs : 0;
 
-  // Lógicas de Filtrado
+  // --- MOTOR DE CONCILIACIÓN CRONOLÓGICA (PESTAÑA 2) ---
+  const estadoDeCuentaGenerado = useMemo(() => {
+    if (!filtroAptoTab2) return { lineas: [], deudaTotalUSD: 0, totalAbonadoUSD: 0, totalAbonadoBs: 0 };
+    
+    const pagosDelApto = pagosResidentes.filter(p => p.apartamento === filtroAptoTab2);
+    const mapaPagos = new Map();
+    let totalPagadoU = 0;
+    let totalPagadoB = 0;
+
+    // Desglosamos los pagos por "Mes-Año" para cruzarlos con el tiempo
+    pagosDelApto.forEach(p => {
+      totalPagadoU += Number(p.monto_pagado_usd);
+      totalPagadoB += Number(p.monto_pagado_bs);
+      const mesesAb = p.mes_correspondiente.split(',').map((m: string) => m.trim());
+      mesesAb.forEach((m: string) => {
+        mapaPagos.set(`${m}-${p.anio_correspondiente}`, p);
+      });
+    });
+
+    const lineas = [];
+    let deudaTotalAcumulada = 0;
+    const fechaActual = new Date();
+    const anoActual = fechaActual.getFullYear();
+    const mesActual = fechaActual.getMonth();
+
+    let anioIterador = ANO_INICIO_OPERACIONES;
+    let mesIterador = MES_INICIO_OPERACIONES;
+
+    // Bucle generador desde Enero 2025 hasta el Mes Actual
+    while (anioIterador < anoActual || (anioIterador === anoActual && mesIterador <= mesActual)) {
+      const nombreMes = mesesDelAno[mesIterador];
+      const claveBusqueda = `${nombreMes}-${anioIterador}`;
+      const pagoRealizado = mapaPagos.get(claveBusqueda);
+
+      if (pagoRealizado) {
+        lineas.push({
+          periodo: claveBusqueda,
+          estatus: 'PAGADO',
+          cargos_usd: 0,
+          abonos_usd: pagoRealizado.monto_pagado_usd, // Solo referencial para la tabla
+          abonos_bs: pagoRealizado.monto_pagado_bs,
+          descripcion: pagoRealizado.descripcion,
+          fecha: new Date(pagoRealizado.created_at).toLocaleDateString()
+        });
+      } else {
+        lineas.push({
+          periodo: claveBusqueda,
+          estatus: 'PENDIENTE',
+          cargos_usd: CUOTA_MENSUAL_USD,
+          abonos_usd: 0,
+          abonos_bs: 0,
+          descripcion: 'Cuota Mensual de Condominio',
+          fecha: '-'
+        });
+        deudaTotalAcumulada += CUOTA_MENSUAL_USD;
+      }
+
+      mesIterador++;
+      if (mesIterador > 11) {
+        mesIterador = 0;
+        anioIterador++;
+      }
+    }
+
+    return { 
+      lineas: lineas.reverse(), // Mostramos los más recientes arriba
+      deudaTotalUSD: deudaTotalAcumulada, 
+      totalAbonadoUSD: totalPagadoU, 
+      totalAbonadoBs: totalPagadoB 
+    };
+  }, [filtroAptoTab2, pagosResidentes]);
+
+  // --- FILTROS PESTAÑA 3 Y 5 ---
   const dataResidentesFiltrada = pagosResidentes.filter(p => {
     return (filtroAnio === '' || p.anio_correspondiente.toLowerCase().includes(filtroAnio.toLowerCase())) &&
            (filtroMes === '' || p.mes_correspondiente.includes(filtroMes)) &&
            (filtroPiso === '' || p.piso.toString().toLowerCase().includes(filtroPiso.toLowerCase())) &&
            (filtroApto === '' || p.apartamento.toLowerCase().includes(filtroApto.toLowerCase()));
   });
-
-  const historialApto = pagosResidentes.filter(p => p.apartamento === filtroAptoTab2);
-  const totalAptoUSD = historialApto.reduce((acc, p) => acc + Number(p.monto_pagado_usd), 0);
-  const totalAptoBs = historialApto.reduce((acc, p) => acc + Number(p.monto_pagado_bs), 0);
 
   const transaccionesMesTab5 = transacciones.filter(t => t.mes === filtroMesTab5 && t.anio === filtroAnioTab5);
   const mesIngresoUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
@@ -192,6 +268,7 @@ export default function FinanzasTorreD10() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8 animate-fadeIn">
+        
         {/* PESTAÑA 1 */}
         {activeTab === 'RESUMEN' && (
           <div className="no-print space-y-6">
@@ -209,11 +286,11 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 2: ESTADO DE CUENTA */}
+        {/* PESTAÑA 2: ESTADO DE CUENTA CRONOLÓGICO */}
         {activeTab === 'BUSQUEDA' && (
           <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-300 pb-2">
-              <h2 className="text-2xl font-bold text-emerald-950">Estado de Cuenta por Apartamento</h2>
+              <h2 className="text-2xl font-bold text-emerald-950">Estado de Cuenta Histórico</h2>
               {filtroAptoTab2 && (
                 <button onClick={() => handlePrint(`Estado de Cuenta - Apto ${filtroAptoTab2}`)} className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md text-xs uppercase tracking-widest transition-colors flex items-center gap-2">🖨️ Imprimir Estado</button>
               )}
@@ -227,51 +304,62 @@ export default function FinanzasTorreD10() {
                     {listaApartamentos.map(apto => <option key={apto} value={apto}>{apto}</option>)}
                   </select>
                </div>
+               <div className="w-2/3 flex justify-end items-center text-xs text-slate-400">
+                  <span className="bg-slate-100 px-3 py-1 rounded-full border border-slate-200">ℹ️ El cálculo inicia desde Enero 2025. Cuota Fija: $10/mes.</span>
+               </div>
             </div>
 
             {filtroAptoTab2 && (
               <div className="print-area bg-white p-8 rounded-xl shadow-lg border border-slate-200">
-                <div className="border-b-2 border-emerald-900 pb-6 mb-6 flex justify-between items-center">
+                <div className="border-b-2 border-emerald-900 pb-6 mb-6 flex justify-between items-start">
                   <div>
                     <h1 className="text-3xl font-bold text-emerald-950 tracking-widest">TORRE D-10</h1>
-                    <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">Reporte de Estado de Cuenta</p>
+                    <p className="text-xs text-slate-500 uppercase tracking-widest mt-1">Estado de Cuenta General</p>
                   </div>
                   <div className="text-right">
                     <p className="text-2xl font-bold text-emerald-900">APTO {filtroAptoTab2}</p>
-                    <p className="text-xs text-slate-500 font-mono mt-1">Emitido: {new Date().toLocaleDateString()}</p>
+                    <p className="text-xs text-slate-500 font-mono mt-1">Corte a: {new Date().toLocaleDateString()}</p>
                   </div>
                 </div>
 
-                <table className="w-full text-left text-sm whitespace-nowrap mb-8">
-                  <thead className="bg-emerald-50 text-emerald-900 font-bold uppercase text-[10px] tracking-wider border-y-2 border-emerald-900">
-                    <tr><th className="p-3">Fecha de Registro</th><th className="p-3">Meses Cancelados</th><th className="p-3">Descripción</th><th className="p-3 text-right">Abono USD</th><th className="p-3 text-right">Abono Bs</th><th className="p-3 text-center">Estatus</th></tr>
+                <div className="grid grid-cols-3 gap-6 mb-8">
+                  <div className="bg-red-50 p-4 rounded-lg border border-red-200 text-center shadow-sm">
+                     <p className="text-[10px] text-red-700 uppercase tracking-widest font-bold">Deuda Pendiente Total</p>
+                     <p className="text-3xl font-mono font-bold text-red-900">${formatMoney(estadoDeCuentaGenerado.deudaTotalUSD)}</p>
+                  </div>
+                  <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200 text-center shadow-sm">
+                     <p className="text-[10px] text-emerald-700 uppercase tracking-widest font-bold">Total Abonado Histórico USD</p>
+                     <p className="text-3xl font-mono font-bold text-emerald-900">${formatMoney(estadoDeCuentaGenerado.totalAbonadoUSD)}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-center shadow-sm">
+                     <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total Abonado Histórico Bs</p>
+                     <p className="text-3xl font-mono font-bold text-emerald-900">Bs {formatMoney(estadoDeCuentaGenerado.totalAbonadoBs)}</p>
+                  </div>
+                </div>
+
+                <h3 className="text-sm font-bold text-emerald-900 uppercase tracking-widest mb-3 border-b border-slate-200 pb-2">Detalle Mes a Mes</h3>
+                <table className="w-full text-left text-xs whitespace-nowrap mb-8">
+                  <thead className="bg-emerald-950 text-emerald-50 font-bold uppercase text-[10px] tracking-wider">
+                    <tr><th className="p-3">Periodo (Mes/Año)</th><th className="p-3">Estatus</th><th className="p-3">Fecha de Pago</th><th className="p-3 text-right">Cargos (Deuda)</th><th className="p-3 text-right">Descripción Referencial</th></tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {historialApto.length === 0 ? (<tr><td colSpan={6} className="p-8 text-center text-slate-400">Sin registros de pago encontrados para el Apto {filtroAptoTab2}.</td></tr>) : (
-                      historialApto.map((p) => (
-                        <tr key={p.id}>
-                          <td className="p-3 text-xs text-slate-500 font-mono">{new Date(p.created_at).toLocaleDateString()}</td>
-                          <td className="p-3 font-semibold text-slate-800">{p.mes_correspondiente} {p.anio_correspondiente}</td>
-                          <td className="p-3 text-slate-600 truncate max-w-[200px]">{p.descripcion}</td>
-                          <td className="p-3 text-right font-mono font-bold text-emerald-700">${formatMoney(p.monto_pagado_usd)}</td>
-                          <td className="p-3 text-right font-mono font-bold text-emerald-700">Bs {formatMoney(p.monto_pagado_bs)}</td>
-                          <td className="p-3 text-center"><span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{p.estatus_solvencia}</span></td>
-                        </tr>
-                      ))
-                    )}
+                  <tbody className="divide-y divide-slate-200">
+                    {estadoDeCuentaGenerado.lineas.map((linea, idx) => (
+                      <tr key={idx} className={linea.estatus === 'PENDIENTE' ? 'bg-red-50/30' : ''}>
+                        <td className="p-3 font-semibold text-slate-800">{linea.periodo}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-1 rounded text-[9px] font-bold tracking-widest ${linea.estatus === 'PAGADO' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                            {linea.estatus}
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-500 font-mono">{linea.fecha}</td>
+                        <td className="p-3 text-right font-mono font-bold text-slate-700">
+                          {linea.estatus === 'PENDIENTE' ? `$${formatMoney(linea.cargos_usd)}` : '-'}
+                        </td>
+                        <td className="p-3 text-right text-slate-500 text-[10px] truncate max-w-[200px]">{linea.descripcion}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-
-                <div className="flex justify-end gap-8 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                   <div className="text-right">
-                     <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total Histórico USD</p>
-                     <p className="text-2xl font-mono font-bold text-emerald-900">${formatMoney(totalAptoUSD)}</p>
-                   </div>
-                   <div className="text-right">
-                     <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total Histórico Bs</p>
-                     <p className="text-2xl font-mono font-bold text-emerald-900">Bs {formatMoney(totalAptoBs)}</p>
-                   </div>
-                </div>
               </div>
             )}
           </div>
@@ -289,11 +377,11 @@ export default function FinanzasTorreD10() {
                 <div className="md:col-span-7"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Meses a Cancelar (Selección Múltiple)</label><div className="grid grid-cols-3 lg:grid-cols-4 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">{mesesDelAno.map(mes => (<label key={mes} className="flex items-center space-x-2 text-xs font-medium cursor-pointer text-slate-700 hover:text-emerald-700"><input type="checkbox" checked={formPagoResidente.meses_seleccionados.includes(mes)} onChange={() => toggleMes(mes)} className="accent-emerald-600 w-3 h-3" /><span>{mes}</span></label>))}</div></div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
-                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono" /></div>
-                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono Bs.</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono" /></div>
-                <div className="md:col-span-6"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descripción del Pago</label><input type="text" placeholder="Ej. Pago por Zelle #1234..." value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm" /></div>
+                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Monto de Recibo USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" /></div>
+                <div className="md:col-span-3"><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Monto de Recibo Bs.</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" /></div>
+                <div className="md:col-span-6"><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descripción del Pago</label><input type="text" placeholder="Ej. Pago por Zelle #1234..." value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" /></div>
               </div>
-              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs">💾 Registrar Recaudación</button></div>
+              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs transition-transform active:scale-95">💾 Registrar Recaudación</button></div>
             </form>
             <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200">
               <p className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-3">Filtros de Auditoría Avanzada</p>
@@ -306,7 +394,7 @@ export default function FinanzasTorreD10() {
             </div>
             <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
               <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-900 text-white font-mono uppercase text-[10px] tracking-wider"><tr><th className="p-4 text-center">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Meses Abonados</th><th className="p-4">Descripción</th><th className="p-4 text-right bg-emerald-950/20">Abono USD</th><th className="p-4 text-right bg-emerald-950/20">Abono Bs.</th><th className="p-4 text-center">Condición</th></tr></thead>
+                <thead className="bg-slate-900 text-white font-mono uppercase text-[10px] tracking-wider"><tr><th className="p-4 text-center">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Meses Abonados</th><th className="p-4">Descripción</th><th className="p-4 text-right bg-emerald-950/20">Recibo USD</th><th className="p-4 text-right bg-emerald-950/20">Recibo Bs.</th><th className="p-4 text-center">Condición</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                   {dataResidentesFiltrada.length === 0 ? (<tr><td colSpan={7} className="p-8 text-center text-slate-400 font-medium">Ningún registro coincide.</td></tr>) : (
                     dataResidentesFiltrada.map((item) => (
@@ -352,7 +440,7 @@ export default function FinanzasTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 5: CIERRE MENSUAL */}
+        {/* PESTAÑA 5 */}
         {activeTab === 'GASTOS_MENSUAL' && (
           <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-300 pb-2">
@@ -361,7 +449,6 @@ export default function FinanzasTorreD10() {
                 <button onClick={() => handlePrint(`Cierre Mensual - ${filtroMesTab5} ${filtroAnioTab5}`)} className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 px-4 rounded shadow-md text-xs uppercase tracking-widest transition-colors flex items-center gap-2">🖨️ Imprimir Cierre</button>
               )}
             </div>
-            
             <div className="no-print bg-white p-6 rounded-xl shadow-lg border border-slate-200 flex gap-4 items-end">
                <div className="w-1/4">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Filtrar por Año</label>
@@ -375,7 +462,6 @@ export default function FinanzasTorreD10() {
                   </select>
                </div>
             </div>
-
             {filtroMesTab5 && (
               <div className="print-area bg-white p-8 rounded-xl shadow-lg border border-slate-200">
                 <div className="border-b-2 border-emerald-900 pb-6 mb-6 flex justify-between items-center">
@@ -388,7 +474,6 @@ export default function FinanzasTorreD10() {
                     <p className="text-xs text-slate-500 font-mono mt-1">Generado: {new Date().toLocaleDateString()}</p>
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-6 mb-8">
                   <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-200 pb-1">Balance Operativo USD</p>
@@ -403,24 +488,15 @@ export default function FinanzasTorreD10() {
                     <div className="flex justify-between text-base border-t border-slate-200 pt-2"><span className="font-bold text-slate-800">Neto Mensual:</span><span className={`font-mono font-bold ${mesIngresoBs - mesGastoBs >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>Bs {formatMoney(mesIngresoBs - mesGastoBs)}</span></div>
                   </div>
                 </div>
-
-                <h3 className="text-sm font-bold text-emerald-900 uppercase tracking-widest mb-3">Detalle de Movimientos</h3>
                 <table className="w-full text-left text-[11px] whitespace-nowrap">
                   <thead className="bg-emerald-50 text-emerald-900 font-bold uppercase tracking-wider border-y border-emerald-900">
                     <tr><th className="p-2">Fecha/ID</th><th className="p-2">Descripción</th><th className="p-2 text-right">Ingreso $</th><th className="p-2 text-right">Egreso $</th><th className="p-2 text-right border-r border-emerald-200">Saldo $</th><th className="p-2 text-right">Ingreso Bs</th><th className="p-2 text-right">Egreso Bs</th><th className="p-2 text-right">Saldo Bs</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {transaccionesMesTab5.length === 0 ? (<tr><td colSpan={8} className="p-8 text-center text-slate-400">Sin movimientos registrados en este periodo.</td></tr>) : (
+                    {transaccionesMesTab5.length === 0 ? (<tr><td colSpan={8} className="p-8 text-center text-slate-400">Sin movimientos registrados.</td></tr>) : (
                       transaccionesMesTab5.map((t) => (
                         <tr key={t.id}>
-                          <td className="p-2 text-slate-500 font-mono">#{t.id}</td>
-                          <td className="p-2 text-slate-800 font-medium truncate max-w-[200px]">{t.descripcion}</td>
-                          <td className="p-2 text-right font-mono text-emerald-600">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
-                          <td className="p-2 text-right font-mono text-red-600">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td>
-                          <td className="p-2 text-right font-mono font-bold border-r border-emerald-50">{formatMoney(t.saldo_usd)}</td>
-                          <td className="p-2 text-right font-mono text-emerald-600">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
-                          <td className="p-2 text-right font-mono text-red-600">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
-                          <td className="p-2 text-right font-mono font-bold">{formatMoney(t.saldo_bs)}</td>
+                          <td className="p-2 text-slate-500 font-mono">#{t.id}</td><td className="p-2 text-slate-800 font-medium truncate max-w-[200px]">{t.descripcion}</td><td className="p-2 text-right font-mono text-emerald-600">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td><td className="p-2 text-right font-mono text-red-600">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td><td className="p-2 text-right font-mono font-bold border-r border-emerald-50">{formatMoney(t.saldo_usd)}</td><td className="p-2 text-right font-mono text-emerald-600">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td><td className="p-2 text-right font-mono text-red-600">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td><td className="p-2 text-right font-mono font-bold">{formatMoney(t.saldo_bs)}</td>
                         </tr>
                       ))
                     )}

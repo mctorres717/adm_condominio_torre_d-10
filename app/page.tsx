@@ -18,18 +18,19 @@ export default function FinanzasTorreD10() {
   const [transacciones, setTransacciones] = useState<any[]>([]);
   const [pagosResidentes, setPagosResidentes] = useState<any[]>([]);
 
-  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' });
-  const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_correspondiente: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '' });
+  // PESTAÑA 4: Formulario exclusivo para GASTOS
+  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
+  
+  // PESTAÑA 3: Formulario con descripción y arreglo de meses
+  const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', meses_seleccionados: [] as string[], anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', descripcion: '' });
 
   const [filtroAnio, setFiltroAnio] = useState('');
   const [filtroMes, setFiltroMes] = useState('');
   const [filtroPiso, setFiltroPiso] = useState('');
   const [filtroApto, setFiltroApto] = useState('');
 
-  // Generador automático de lista de apartamentos ejecutivos (Piso 1 al 14, Aptos A al D)
-  const listaApartamentos = Array.from({ length: 14 }, (_, p) => 
-    ['A', 'B', 'C', 'D'].map(letra => `${p + 1}-${letra}`)
-  ).flat();
+  const listaApartamentos = Array.from({ length: 14 }, (_, p) => ['A', 'B', 'C', 'D'].map(letra => `${p + 1}-${letra}`)).flat();
+  const mesesDelAno = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
   useEffect(() => {
     if (typeof window !== 'undefined' && localStorage.getItem('finanzasAuth') === 'true') setIsAuth(true);
@@ -77,49 +78,92 @@ export default function FinanzasTorreD10() {
 
   const handleLogout = () => { setIsAuth(false); setPin(''); if (typeof window !== 'undefined') localStorage.removeItem('finanzasAuth'); };
 
+  // --- REGISTRO DE GASTOS (PESTAÑA 4) ---
   const handleRegistrarMovimiento = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formGasto.anio || !formGasto.mes || !formGasto.descripcion) return alert("Año, Mes y Descripción son obligatorios.");
-    const payload = { ...formGasto, fecha: new Date().toISOString(), ingreso_usd: Number(formGasto.ingreso_usd)||0, gasto_usd: Number(formGasto.gasto_usd)||0, ingreso_bs: Number(formGasto.ingreso_bs)||0, gasto_bs: Number(formGasto.gasto_bs)||0, referencia: formGasto.referencia || 'N/A' };
+    
+    // Solo se envían gastos (Ingresos van en 0 por defecto)
+    const payload = { 
+      fecha: new Date().toISOString(), 
+      anio: formGasto.anio, 
+      mes: formGasto.mes, 
+      referencia: formGasto.referencia || 'N/A', 
+      descripcion: formGasto.descripcion, 
+      ingreso_usd: 0, 
+      gasto_usd: Number(formGasto.gasto_usd) || 0, 
+      ingreso_bs: 0, 
+      gasto_bs: Number(formGasto.gasto_bs) || 0 
+    };
+    
     const { error } = await supabase.from('finanzas_d10').insert([payload]);
     if (error) alert(`Error: ${error.message}`);
-    else { alert("✅ Transacción registrada."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', ingreso_usd: '', gasto_usd: '', ingreso_bs: '', gasto_bs: '' }); fetchTransacciones(); }
+    else { alert("✅ Gasto registrado en el Libro Diario."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
   };
 
+  // --- REGISTRO DE RECAUDACIÓN (PESTAÑA 3) Y AUTO-SINCRONIZACIÓN AL LIBRO DIARIO ---
   const handleRegistrarPagoResidente = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formPagoResidente.apartamento || !formPagoResidente.mes_correspondiente || !formPagoResidente.monto_pagado_usd) {
-      // Bypass de tipado interno NextJS
-    }
-    if (!formPagoResidente.apartamento || !formPagoResidente.mes_correspondiente) {
-      return alert("Por favor selecciona el Apartamento y el Mes.");
+    if (!formPagoResidente.apartamento || formPagoResidente.meses_seleccionados.length === 0) {
+      return alert("Por favor selecciona el Apartamento y al menos un Mes.");
     }
 
-    // EXTRAER PISO AUTOMÁTICAMENTE (Ej: "10-B" -> "10")
     const pisoCalculado = formPagoResidente.apartamento.split('-')[0];
-
-    // AUTOMATIZACIÓN DE ESTATUS (Si abonó algo de dinero, se marca como PAGADO, de lo contrario PENDIENTE)
     const mUSD = Number(formPagoResidente.monto_pagado_usd) || 0;
     const mBS = Number(formPagoResidente.monto_pagado_bs) || 0;
     const estatusCalculado = (mUSD > 0 || mBS > 0) ? 'PAGADO' : 'PENDIENTE';
+    const mesesUnidos = formPagoResidente.meses_seleccionados.join(', ');
 
-    const payload = {
+    // 1. Guardar en Base de Datos de Residentes
+    const payloadResidente = {
       apartamento: formPagoResidente.apartamento,
       piso: pisoCalculado,
-      mes_correspondiente: formPagoResidente.mes_correspondiente,
+      mes_correspondiente: mesesUnidos,
       anio_correspondiente: formPagoResidente.anio_correspondiente,
       monto_pagado_usd: mUSD,
       monto_pagado_bs: mBS,
-      estatus_solvencia: estatusCalculado
+      estatus_solvencia: estatusCalculado,
+      descripcion: formPagoResidente.descripcion || `Abono de condominio`
     };
 
-    const { error } = await supabase.from('pagos_residentes').insert([payload]);
-    if (error) alert(`Error: ${error.message}`);
-    else {
-      alert(`✅ Registro guardado automáticamente como [${estatusCalculado}] para el Apto ${payload.apartamento}`);
-      setFormPagoResidente({ apartamento: '', mes_correspondiente: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '' });
-      fetchPagosResidentes();
+    const { error: errorResidente } = await supabase.from('pagos_residentes').insert([payloadResidente]);
+    
+    if (errorResidente) {
+      return alert(`Error en Residentes: ${errorResidente.message}`);
     }
+
+    // 2. Sincronización Automática al Libro Diario (Pestaña 4)
+    if (mUSD > 0 || mBS > 0) {
+      const payloadLibroDiario = {
+        fecha: new Date().toISOString(),
+        anio: formPagoResidente.anio_correspondiente,
+        mes: formPagoResidente.meses_seleccionados[formPagoResidente.meses_seleccionados.length - 1], // Usa el último mes seleccionado como referencia temporal
+        referencia: `Apto ${formPagoResidente.apartamento}`,
+        descripcion: `Ingreso Condominio: ${formPagoResidente.descripcion || mesesUnidos}`,
+        ingreso_usd: mUSD,
+        gasto_usd: 0,
+        ingreso_bs: mBS,
+        gasto_bs: 0
+      };
+      
+      await supabase.from('finanzas_d10').insert([payloadLibroDiario]);
+    }
+
+    alert(`✅ Abono registrado. Libro Mayor actualizado automáticamente.`);
+    setFormPagoResidente({ apartamento: '', meses_seleccionados: [], anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', descripcion: '' });
+    fetchPagosResidentes();
+    fetchTransacciones(); // Actualiza los saldos del Dashboard y Pestaña 4
+  };
+
+  const toggleMes = (mes: string) => {
+    setFormPagoResidente(prev => {
+      const seleccionados = prev.meses_seleccionados.includes(mes)
+        ? prev.meses_seleccionados.filter(m => m !== mes)
+        : [...prev.meses_seleccionados, mes];
+      // Ordenar meses cronológicamente
+      seleccionados.sort((a, b) => mesesDelAno.indexOf(a) - mesesDelAno.indexOf(b));
+      return { ...prev, meses_seleccionados: seleccionados };
+    });
   };
 
   const handlePrint = (titulo: string) => { const original = document.title; document.title = titulo; window.print(); setTimeout(() => { document.title = original; }, 1000); };
@@ -134,7 +178,7 @@ export default function FinanzasTorreD10() {
 
   const dataResidentesFiltrada = pagosResidentes.filter(p => {
     return (filtroAnio === '' || p.anio_correspondiente.toLowerCase().includes(filtroAnio.toLowerCase())) &&
-           (filtroMes === '' || p.mes_correspondiente === filtroMes) &&
+           (filtroMes === '' || p.mes_correspondiente.includes(filtroMes)) &&
            (filtroPiso === '' || p.piso.toString().toLowerCase().includes(filtroPiso.toLowerCase())) &&
            (filtroApto === '' || p.apartamento.toLowerCase().includes(filtroApto.toLowerCase()));
   });
@@ -199,41 +243,72 @@ export default function FinanzasTorreD10() {
         {activeTab === 'BASE_DATOS' && (
           <div className="no-print space-y-6 animate-fadeIn">
             <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Master Ledger de Residentes</h2>
+            
             <form onSubmit={handleRegistrarPagoResidente} className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
               <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Cargar Pago de Condominio</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-4 items-start">
+                <div className="md:col-span-3">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Apartamento</label>
                   <select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white font-semibold focus:outline-none focus:border-emerald-500" required>
                     <option value="">-- Seleccionar --</option>
                     {listaApartamentos.map(apto => <option key={apto} value={apto}>{apto}</option>)}
                   </select>
                 </div>
-                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Año</label><input type="text" value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" required /></div>
-                <div><label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Mes a Cancelar</label><select value={formPagoResidente.mes_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, mes_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:border-emerald-500" required><option value="">-- Seleccionar --</option>{['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+                
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Año</label>
+                  <input type="text" value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" required />
+                </div>
+
+                <div className="md:col-span-7">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Meses a Cancelar (Selección Múltiple)</label>
+                  <div className="grid grid-cols-3 lg:grid-cols-4 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    {mesesDelAno.map(mes => (
+                      <label key={mes} className="flex items-center space-x-2 text-xs font-medium cursor-pointer text-slate-700 hover:text-emerald-700">
+                        <input type="checkbox" checked={formPagoResidente.meses_seleccionados.includes(mes)} onChange={() => toggleMes(mes)} className="accent-emerald-600 w-3 h-3" />
+                        <span>{mes}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <div><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Monto Abonado USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" /></div>
-                <div><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Monto Abonado Bs.</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" /></div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
+                <div className="md:col-span-3">
+                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono USD</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Abono Bs.</label>
+                  <input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono focus:outline-none focus:border-emerald-500" />
+                </div>
+                <div className="md:col-span-6">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Descripción del Pago</label>
+                  <input type="text" placeholder="Ej. Pago por Zelle #1234..." value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500" />
+                </div>
               </div>
-              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs transition-transform active:scale-95">💾 Registrar Abono</button></div>
+
+              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs transition-transform active:scale-95">💾 Registrar Recaudación</button></div>
             </form>
+
             <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200">
               <p className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-3">Filtros de Auditoría Avanzada</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <input type="text" placeholder="🔍 Filtrar por Año" value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 font-mono" />
-                <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 cursor-pointer"><option value="">🔍 Todos los Meses</option>{['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}</select>
+                <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 cursor-pointer"><option value="">🔍 Todos los Meses</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select>
                 <input type="text" placeholder="🔍 Filtrar por Piso" value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50" />
                 <input type="text" placeholder="🔍 Filtrar por Apartamento" value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2.5 border border-slate-200 rounded-lg text-xs bg-slate-50 uppercase font-bold text-emerald-800" />
               </div>
             </div>
+
             <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
               <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-900 text-white font-mono uppercase text-[10px] tracking-wider"><tr><th className="p-4 text-center">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Periodo Auditado</th><th className="p-4 text-right bg-emerald-950/20">Abonado USD</th><th className="p-4 text-right bg-emerald-950/20">Abonado Bs.</th><th className="p-4 text-center">Condición</th></tr></thead>
+                <thead className="bg-slate-900 text-white font-mono uppercase text-[10px] tracking-wider"><tr><th className="p-4 text-center">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Meses Abonados</th><th className="p-4">Descripción</th><th className="p-4 text-right bg-emerald-950/20">Abono USD</th><th className="p-4 text-right bg-emerald-950/20">Abono Bs.</th><th className="p-4 text-center">Condición</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  {dataResidentesFiltrada.length === 0 ? (<tr><td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Ningún registro coincide.</td></tr>) : (
+                  {dataResidentesFiltrada.length === 0 ? (<tr><td colSpan={7} className="p-8 text-center text-slate-400 font-medium">Ningún registro coincide.</td></tr>) : (
                     dataResidentesFiltrada.map((item) => (
-                      <tr key={item.id} className="hover:bg-slate-50"><td className="p-4 text-center font-mono font-bold text-slate-500">Piso {item.piso}</td><td className="p-4 font-bold text-emerald-900">{item.apartamento}</td><td className="p-4"><span className="font-semibold text-slate-700">{item.mes_correspondiente}</span> <span className="font-mono text-slate-400">{item.anio_correspondiente}</span></td><td className="p-4 text-right font-mono font-bold text-emerald-600">${formatMoney(item.monto_pagado_usd)}</td><td className="p-4 text-right font-mono font-bold text-emerald-600">Bs {formatMoney(item.monto_pagado_bs)}</td><td className="p-4 text-center"><span className={`px-3 py-1 rounded-full text-[9px] font-bold tracking-widest border ${item.estatus_solvencia === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>{item.estatus_solvencia}</span></td></tr>
+                      <tr key={item.id} className="hover:bg-slate-50"><td className="p-4 text-center font-mono font-bold text-slate-500">Piso {item.piso}</td><td className="p-4 font-bold text-emerald-900">{item.apartamento}</td><td className="p-4"><span className="font-semibold text-slate-700 truncate block max-w-[150px]">{item.mes_correspondiente}</span> <span className="font-mono text-slate-400">{item.anio_correspondiente}</span></td><td className="p-4 text-slate-500 truncate max-w-[150px]">{item.descripcion}</td><td className="p-4 text-right font-mono font-bold text-emerald-600">${formatMoney(item.monto_pagado_usd)}</td><td className="p-4 text-right font-mono font-bold text-emerald-600">Bs {formatMoney(item.monto_pagado_bs)}</td><td className="p-4 text-center"><span className={`px-3 py-1 rounded-full text-[9px] font-bold tracking-widest border ${item.estatus_solvencia === 'PAGADO' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>{item.estatus_solvencia}</span></td></tr>
                     ))
                   )}
                 </tbody>
@@ -243,23 +318,21 @@ export default function FinanzasTorreD10() {
         )}
 
         {activeTab === 'GASTOS_GRAL' && (
-          <div className="no-print space-y-6">
-            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Libro Diario de Transacciones</h2>
+          <div className="no-print space-y-6 animate-fadeIn">
+            <h2 className="text-2xl font-bold text-emerald-950 border-b border-slate-300 pb-2">Libro Diario de Egresos Operativos</h2>
             <form onSubmit={handleRegistrarMovimiento} className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Registrar Nuevo Movimiento Manual</h3>
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Registrar Nuevo Gasto Operativo</h3>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <input type="text" placeholder="Año (Ej. 2026)" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm" required />
-                <select value={formGasto.mes} onChange={e => setFormGasto({...formGasto, mes: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm bg-white" required><option value="">-- Mes --</option>{['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}</select>
-                <input type="text" placeholder="Referencia" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm" />
-                <input type="text" placeholder="Descripción" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm" required />
+                <select value={formGasto.mes} onChange={e => setFormGasto({...formGasto, mes: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm bg-white" required><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select>
+                <input type="text" placeholder="Referencia de Factura" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm" />
+                <input type="text" placeholder="Descripción del Gasto" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 border border-slate-300 rounded-lg text-sm" required />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                <div><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Ingreso USD (+)</label><input type="number" step="0.01" value={formGasto.ingreso_usd} onChange={e => setFormGasto({...formGasto, ingreso_usd: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono" /></div>
-                <div><label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Gasto USD (-)</label><input type="number" step="0.01" value={formGasto.gasto_usd} onChange={e => setFormGasto({...formGasto, gasto_usd: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono" /></div>
-                <div><label className="block text-[10px] font-bold text-emerald-700 uppercase mb-1">Ingreso Bs (+)</label><input type="number" step="0.01" value={formGasto.ingreso_bs} onChange={e => setFormGasto({...formGasto, ingreso_bs: e.target.value})} className="w-full p-3 border border-emerald-200 rounded-lg text-sm font-mono" /></div>
-                <div><label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Gasto Bs (-)</label><input type="number" step="0.01" value={formGasto.gasto_bs} onChange={e => setFormGasto({...formGasto, gasto_bs: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono" /></div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 bg-red-50 p-4 rounded-lg border border-red-100">
+                <div><label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Gasto Realizado USD (-)</label><input type="number" step="0.01" value={formGasto.gasto_usd} onChange={e => setFormGasto({...formGasto, gasto_usd: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono" /></div>
+                <div><label className="block text-[10px] font-bold text-red-700 uppercase mb-1">Gasto Realizado Bs (-)</label><input type="number" step="0.01" value={formGasto.gasto_bs} onChange={e => setFormGasto({...formGasto, gasto_bs: e.target.value})} className="w-full p-3 border border-red-200 rounded-lg text-sm font-mono" /></div>
               </div>
-              <div className="flex justify-end"><button type="submit" className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs">💾 Guardar Transacción</button></div>
+              <div className="flex justify-end"><button type="submit" className="bg-red-700 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-lg shadow-md uppercase tracking-widest text-xs">💾 Registrar Gasto en Libro</button></div>
             </form>
             <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-x-auto">
                <table className="w-full text-left text-xs whitespace-nowrap">

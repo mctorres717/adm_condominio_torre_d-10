@@ -33,29 +33,27 @@ export default function ERPTorreD10() {
   const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
   
   const [autoMesPendiente, setAutoMesPendiente] = useState(true);
-  const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
+  const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_seleccionado: '', anio_corresponding: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
 
-  // --- FILTROS SOBRE CABECERAS (TAB 3) ---
-  const [filtroAnio, setFiltroAnio] = useState('');
-  const [filtroMes, setFiltroMes] = useState('');
+  // --- FILTROS PESTAÑA 3 ---
   const [filtroPiso, setFiltroPiso] = useState('');
   const [filtroApto, setFiltroApto] = useState('');
   const [filtroFechaPagoReal, setFiltroFechaPagoReal] = useState('');
 
-  // --- FILTROS TAB 4 (LIBRO DIARIO) ---
+  // --- FILTROS TAB 4 (RELACION DE GASTOS) ---
   const [filtroAnioTab4, setFiltroAnioTab4] = useState('');
   const [filtroMesTab4, setFiltroMesTab4] = useState('');
 
   // --- FILTROS TAB 2 Y 5 ---
   const [filtroAptoTab2, setFiltroAptoTab2] = useState('');
-  const [filtroMesTab5, setFiltroMesTab5] = useState('');
+  const [filtroMesTab5, setFiltroMesTab5] = useState('TODOS');
   const [filtroAnioTab5, setFiltroAnioTab5] = useState(new Date().getFullYear().toString());
 
   // --- FILTROS TAB 6 (GESTIÓN) ---
   const [pisoActivoTab6, setPisoActivoTab6] = useState<string>('');
   const [editingProp, setEditingProp] = useState<any>(null);
 
-  // Listas dinámicas basadas en el censo
+  // Listas dinámicas
   const listaApartamentos = useMemo(() => {
     return [...new Set(propietarios.map(p => p.apartamento))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   }, [propietarios]);
@@ -64,9 +62,13 @@ export default function ERPTorreD10() {
     return [...new Set(propietarios.map(p => p.piso?.toString()).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
   }, [propietarios]);
 
+  const listaFechasPagoPestaña3 = useMemo(() => {
+    const fechas = pagosResidentes.map(p => p.fecha_pago_real).filter(Boolean);
+    return [...new Set(fechas)].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  }, [pagosResidentes]);
+
   const handleLogout = () => { 
-    setIsAuth(false); 
-    setPin(''); 
+    setIsAuth(false); setPin(''); 
     if (typeof window !== 'undefined') localStorage.removeItem('finanzasAuth'); 
   };
 
@@ -94,12 +96,10 @@ export default function ERPTorreD10() {
   };
 
   useEffect(() => {
-    if (listaPisos.length > 0 && !pisoActivoTab6) {
-      setPisoActivoTab6(listaPisos[0]);
-    }
+    if (listaPisos.length > 0 && !pisoActivoTab6) setPisoActivoTab6(listaPisos[0]);
   }, [listaPisos, pisoActivoTab6]);
 
-  // --- DETECTAR Y CALCULAR AUTOMÁTICAMENTE EL SIGUIENTE MES PENDIENTE ---
+  // --- AUTOMATIZADOR DE MES PENDIENTE ---
   const siguienteMesPendienteCalculado = useMemo(() => {
     if (!formPagoResidente.apartamento || !autoMesPendiente) return null;
     
@@ -112,32 +112,22 @@ export default function ERPTorreD10() {
         .map(p => `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`)
     );
 
-    let anioIterador = 2025;
-    let mesIterador = 0; 
-
+    let anioIterador = 2025, mesIterador = 0; 
     if (resInfo && resInfo.inicio_ano && resInfo.inicio_mes) {
       anioIterador = Number(resInfo.inicio_ano);
       const idxMes = mesesDelAno.findIndex(m => m.toLowerCase() === resInfo.inicio_mes.toLowerCase().trim());
       if (idxMes !== -1) mesIterador = idxMes;
     }
 
-    const hoy = new Date();
-    const aAct = hoy.getFullYear();
-    const mAct = hoy.getMonth();
+    const hoy = new Date(); const aAct = hoy.getFullYear(), mAct = hoy.getMonth();
 
     while (anioIterador < aAct || (anioIterador === aAct && mesIterador <= mAct)) {
       const nomMes = mesesDelAno[mesIterador];
       const claveBusqueda = `${nomMes.toLowerCase()}-${anioIterador}`;
-      
-      if (!mapaPagos.has(claveBusqueda)) {
-        return { mes: nomMes, anio: anioIterador.toString() };
-      }
+      if (!mapaPagos.has(claveBusqueda)) return { mes: nomMes, anio: anioIterador.toString() };
       
       mesIterador++;
-      if (mesIterador > 11) {
-        mesIterador = 0;
-        anioIterador++;
-      }
+      if (mesIterador > 11) { mesIterador = 0; anioIterador++; }
     }
     return { mes: mesesDelAno[mAct], anio: aAct.toString() };
   }, [formPagoResidente.apartamento, autoMesPendiente, pagosResidentes, propietarios]);
@@ -145,9 +135,7 @@ export default function ERPTorreD10() {
   useEffect(() => {
     if (siguienteMesPendienteCalculado && autoMesPendiente) {
       setFormPagoResidente(prev => ({
-        ...prev,
-        mes_seleccionado: siguienteMesPendienteCalculado.mes,
-        anio_correspondiente: siguienteMesPendienteCalculado.anio
+        ...prev, mes_seleccionado: siguienteMesPendienteCalculado.mes, anio_corresponding: siguienteMesPendienteCalculado.anio
       }));
     }
   }, [siguienteMesPendienteCalculado, autoMesPendiente]);
@@ -167,7 +155,7 @@ export default function ERPTorreD10() {
     if (data) setPropietarios(data.sort((a, b) => a.apartamento.localeCompare(b.apartamento, undefined, { numeric: true, sensitivity: 'base' })));
   };
 
-  // --- LIBRO DIARIO CONSOLIDADO: DETECTOR ANALÍTICO DE FECHAS MULTI-FORMATO ---
+  // --- CORE DE CAJA: PARSER ESTRICTO DE FECHA ---
   const libroDiarioConsolidado = useMemo(() => {
     const ingresosAgrupados = new Map<string, { usd: number, bs: number }>();
     
@@ -176,62 +164,38 @@ export default function ERPTorreD10() {
       const mBS = Number(p.monto_pagado_bs || 0);
       if (mUSD === 0 && mBS === 0) return; 
 
-      let anioPagoReal = p.anio_correspondiente?.toString() || '2025';
-      let mesPagoReal = p.mes_correspondiente || 'Enero';
-      
+      let anioPagoReal = '2025';
+      let mesPagoReal = 'Enero';
       const fechaStr = p.fecha_pago_real ? p.fecha_pago_real.toString().trim() : '';
 
       if (fechaStr) {
-        const delimiters = /[-/]/;
-        const parts = fechaStr.split(delimiters).map((x: string) => x.trim());
+        let y = 0, m = 0;
+        if (fechaStr.includes('-')) {
+          const pt = fechaStr.split('-');
+          if (pt[0].length === 4) { y = parseInt(pt[0], 10); m = parseInt(pt[1], 10); } 
+          else if (pt[2].length === 4) { y = parseInt(pt[2], 10); m = parseInt(pt[1], 10); } 
+        } else if (fechaStr.includes('/')) {
+          const pt = fechaStr.split('/');
+          if (pt[2].length === 4) { y = parseInt(pt[2], 10); m = parseInt(pt[1], 10); } 
+          else if (pt[0].length === 4) { y = parseInt(pt[0], 10); m = parseInt(pt[1], 10); } 
+        } else {
+          const d = new Date(fechaStr);
+          if (!isNaN(d.getTime())) { y = d.getFullYear(); m = d.getMonth() + 1; }
+        }
         
-        if (parts.length === 3) {
-          let month = 0, year = 0;
-          
-          if (parts[0].length === 4) { // Formato Estándar YYYY-MM-DD
-            year = parseInt(parts[0], 10);
-            const p1 = parseInt(parts[1], 10);
-            const p2 = parseInt(parts[2], 10);
-            month = p1 > 12 ? p2 : p1;
-          } else if (parts[2].length === 4) { // Formato de Exportación Excel (DD/MM/YYYY o MM/DD/YYYY)
-            year = parseInt(parts[2], 10);
-            const p0 = parseInt(parts[0], 10);
-            const p1 = parseInt(parts[1], 10);
-            
-            if (p0 > 12) { month = p1; } 
-            else if (p1 > 12) { month = p0; } 
-            else {
-              // Caso ambiguo (ej: 05/12/2023). Desempatamos cruzando con el mes contable de su cuota
-              const targetMesIdx = mesesDelAno.findIndex(m => m.toLowerCase() === (p.mes_correspondiente || '').toLowerCase().trim());
-              if (targetMesIdx !== -1) {
-                if (p1 === targetMesIdx + 1) month = p1;
-                else if (p0 === targetMesIdx + 1) month = p0;
-                else month = p1;
-              } else {
-                month = p1; 
-              }
-            }
-          }
-          
-          if (year >= 2023 && month >= 1 && month <= 12) {
-            anioPagoReal = year.toString();
-            mesPagoReal = mesesDelAno[month - 1];
-          }
+        if (y >= 2023 && m >= 1 && m <= 12) {
+          anioPagoReal = y.toString();
+          mesPagoReal = mesesDelAno[m - 1];
         }
       }
 
-      const clave = `${mesPagoReal.toLowerCase().trim()}-${anioPagoReal.trim()}`;
-      
-      if (!ingresosAgrupados.has(clave)) {
-        ingresosAgrupados.set(clave, { usd: 0, bs: 0 });
-      }
+      const clave = `${mesPagoReal.toLowerCase()}-${anioPagoReal}`;
+      if (!ingresosAgrupados.has(clave)) ingresosAgrupados.set(clave, { usd: 0, bs: 0 });
       const item = ingresosAgrupados.get(clave)!;
-      item.usd += mUSD;
-      item.bs += mBS;
+      item.usd += mUSD; item.bs += mBS;
     });
 
-    let saldoUSD = 0;
-    let saldoBS = 0;
+    let saldoUSD = 0, saldoBS = 0;
     const lineasFinales: any[] = [];
     
     transacciones.forEach(t => {
@@ -267,61 +231,60 @@ export default function ERPTorreD10() {
   }, [transacciones, pagosResidentes]);
 
   const handleEliminarTransaccion = async (id: any) => {
-    if (id.toString().includes('REC-')) return alert("ℹ️ Los flujos de ingreso centralizados se deben eliminar directamente borrando el recibo origen desde la Pestaña 3.");
-    if (!window.confirm("⚠️ ¿Desea eliminar este egreso del libro diario operativo?")) return;
+    if (id.toString().includes('REC-')) return alert("ℹ️ Los flujos de ingreso se eliminan borrando el recibo origen desde la Pestaña 3.");
+    if (!window.confirm("⚠️ ¿Desea eliminar este egreso de la relación operativa?")) return;
     const { error } = await supabase.from('finanzas_d10').delete().eq('id', id);
-    if (error) alert(error.message); else { alert("✅ Registro eliminado."); fetchTransacciones(); }
+    if (!error) { alert("✅ Registro eliminado."); fetchTransacciones(); }
   };
 
   const handleEliminarPagoResidente = async (id: number) => {
     if (!window.confirm("⚠️ ¿Desea eliminar este registro de pago de la base de datos?")) return;
     const { error } = await supabase.from('pagos_residentes').delete().eq('id', id);
-    if (error) alert(error.message); else { alert("✅ Pago eliminado."); fetchPagosResidentes(); }
+    if (!error) { alert("✅ Pago eliminado."); fetchPagosResidentes(); }
   };
 
   const handleRegistrarMovimiento = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = { fecha: new Date().toISOString(), anio: formGasto.anio, mes: formGasto.mes, referencia: formGasto.referencia || 'N/A', descripcion: formGasto.descripcion, ingreso_usd: 0, gasto_usd: Number(formGasto.gasto_usd)||0, ingreso_bs: 0, gasto_bs: Number(formGasto.gasto_bs)||0 };
     const { error } = await supabase.from('finanzas_d10').insert([payload]);
-    if (error) alert(error.message); else { alert("✅ Gasto registrado."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
+    if (!error) { alert("✅ Gasto registrado."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
   };
 
   const handleRegistrarPagoResidente = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formPagoResidente.apartamento || !formPagoResidente.mes_seleccionado) return alert("Por favor complete los campos obligatorios.");
+    if (!formPagoResidente.apartamento || !formPagoResidente.mes_seleccionado) return alert("Complete los campos obligatorios.");
     const piso = formPagoResidente.apartamento.split('-')[0];
     const mUSD = Number(formPagoResidente.monto_pagado_usd)||0, mBS = Number(formPagoResidente.monto_pagado_bs)||0;
 
     const { error } = await supabase.from('pagos_residentes').insert([{ 
-      apartamento: formPagoResidente.apartamento, piso, 
-      mes_correspondiente: formPagoResidente.mes_seleccionado, 
-      anio_correspondiente: formPagoResidente.anio_correspondiente, 
-      monto_pagado_usd: mUSD, monto_pagado_bs: mBS, 
-      fecha_pago_real: formPagoResidente.fecha_pago_real,
-      descripcion: formPagoResidente.descripcion || 'Abono de condominio'
+      apartamento: formPagoResidente.apartamento, piso, mes_correspondiente: formPagoResidente.mes_seleccionado, 
+      anio_correspondiente: formPagoResidente.anio_corresponding, monto_pagado_usd: mUSD, monto_pagado_bs: mBS, 
+      fecha_pago_real: formPagoResidente.fecha_pago_real, descripcion: formPagoResidente.descripcion || 'Abono de condominio'
     }]);
-    if (error) return alert(error.message);
-    
-    alert("✅ Recaudación guardada."); 
-    setFormPagoResidente({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
-    fetchPagosResidentes();
+    if (!error) {
+      alert("✅ Recaudación guardada."); 
+      setFormPagoResidente({ apartamento: '', mes_seleccionado: '', anio_corresponding: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
+      fetchPagosResidentes();
+    }
   };
 
   const handleSavePropietario = async (e: React.FormEvent) => {
     e.preventDefault();
     const { error } = await supabase.from('propietarios_d10').update({ propietario: editingProp.propietario, cedula: editingProp.cedula, piso: editingProp.piso, inicio_mes: editingProp.inicio_mes, inicio_ano: editingProp.inicio_ano }).eq('id', editingProp.id);
-    if (error) alert(error.message); else { alert("✅ Censo actualizado."); setEditingProp(null); fetchPropietarios(); }
+    if (!error) { alert("✅ Censo actualizado."); setEditingProp(null); fetchPropietarios(); }
   };
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === 'admin') { setIsAuth(true); if (typeof window !== 'undefined') localStorage.setItem('finanzasAuth', 'true'); }
-    else alert('Clave de acceso denegada.');
+    if (pin === 'admin') { setIsAuth(true); if (typeof window !== 'undefined') localStorage.setItem('finanzasAuth', 'true'); } else alert('Acceso denegado.');
   };
 
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
-  // --- REDUCER DINÁMICO DE LA PESTAÑA 1 (FILTRO COMBINADO MES/AÑO CONTABLE) ---
+  // --- FUNCIÓN GLOBAL DE IMPRESIÓN ---
+  const handlePrint = (titulo: string) => { window.print(); };
+
+  // --- REDUCER PESTAÑA 1 (CORREGIDO) ---
   const finanzasTab1Calculadas = useMemo(() => {
     const tFiltradas = libroDiarioConsolidado.filter(t => 
       (filtroAnioTab1 === 'TODOS' || t.anio?.toString().trim() === filtroAnioTab1.trim()) &&
@@ -334,10 +297,9 @@ export default function ERPTorreD10() {
     return { ingresoUSD: iUSD, gastoUSD: gUSD, saldoUSD: iUSD - gUSD, ingresoBs: iBS, gastoBs: gBS, saldoBs: iBS - gBS };
   }, [libroDiarioConsolidado, filtroAnioTab1, filtroMesTab1]);
 
-  // --- MOTOR CONTABLE PESTAÑA 2 ---
+  // --- MOTOR ESTADO DE CUENTA PESTAÑA 2 ---
   const estadoDeCuentaGenerado = useMemo(() => {
     if (!filtroAptoTab2) return { lineas: [], deudaTotalUSD: 0, totalAbonadoUSD: 0, totalAbonadoBs: 0, propietario: null };
-    
     const resInfo = propietarios.find((p: any) => p.apartamento === filtroAptoTab2);
     const pagosDelApto = pagosResidentes.filter(p => p.apartamento === filtroAptoTab2);
     
@@ -345,19 +307,12 @@ export default function ERPTorreD10() {
     let tUSD = 0, tBS = 0;
 
     pagosDelApto.forEach(p => {
-      const mUSD = Number(p.monto_pagado_usd || 0);
-      const mBS = Number(p.monto_pagado_bs || 0);
+      const mUSD = Number(p.monto_pagado_usd || 0), mBS = Number(p.monto_pagado_bs || 0);
       tUSD += mUSD; tBS += mBS;
-      
-      if (mUSD > 0 || mBS > 0) {
-        const clave = `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`;
-        mapaPagos.set(clave, p);
-      }
+      if (mUSD > 0 || mBS > 0) mapaPagos.set(`${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`, p);
     });
 
-    let anioIterador = 2025;
-    let mesIterador = 0; 
-
+    let anioIterador = 2025, mesIterador = 0; 
     if (resInfo && resInfo.inicio_ano && resInfo.inicio_mes) {
       anioIterador = Number(resInfo.inicio_ano);
       const idxMes = mesesDelAno.findIndex(m => m.toLowerCase() === resInfo.inicio_mes.toLowerCase().trim());
@@ -368,61 +323,41 @@ export default function ERPTorreD10() {
     const hoy = new Date(); const aAct = hoy.getFullYear(), mAct = hoy.getMonth();
 
     while (anioIterador < aAct || (anioIterador === aAct && mesIterador <= mAct)) {
-      const nomMes = mesesDelAno[mesIterador];
-      const claveBusqueda = `${nomMes.toLowerCase()}-${anioIterador}`;
+      const nomMes = mesesDelAno[mesIterador], claveBusqueda = `${nomMes.toLowerCase()}-${anioIterador}`;
       const pagoReal = mapaPagos.get(claveBusqueda);
 
       if (pagoReal) {
         let fPago = pagoReal.fecha_pago_real || '';
-        if (fPago.includes('-') && fPago.split('-').length === 3) { 
-          const pt = fPago.split('-'); 
-          if(pt[0].length === 4) fPago = `${pt[2]}/${pt[1]}/${pt[0]}`; 
-        }
-        
-        lineas.push({
-          periodo: `${nomMes} ${anioIterador}`, estatus: 'PAGADO', cargos: 0,
-          desc_ref: pagoReal.descripcion || `Pago cuota realizado el ${fPago}`, fecha_ejecucion: fPago || 'Fecha no registrada'
-        });
+        if (fPago.includes('-') && fPago.split('-')[0].length === 4) { const pt = fPago.split('-'); fPago = `${pt[2]}/${pt[1]}/${pt[0]}`; }
+        lineas.push({ periodo: `${nomMes} ${anioIterador}`, estatus: 'PAGADO', cargos: 0, desc_ref: pagoReal.descripcion || `Pago cuota realizado el ${fPago}`, fecha_ejecucion: fPago || 'No registrada' });
       } else {
-        lineas.push({
-          periodo: `${nomMes} ${anioIterador}`, estatus: 'PENDIENTE', cargos: CUOTA_MENSUAL_USD,
-          desc_ref: 'Cuota Condominio Pendiente de Pago', fecha_ejecucion: 'Pendiente por pagar'
-        });
+        lineas.push({ periodo: `${nomMes} ${anioIterador}`, estatus: 'PENDIENTE', cargos: CUOTA_MENSUAL_USD, desc_ref: 'Cuota Pendiente', fecha_ejecucion: 'Pendiente por pagar' });
         deudaAcumulada += CUOTA_MENSUAL_USD;
       }
       mesIterador++; if (mesIterador > 11) { mesIterador = 0; anioIterador++; }
     }
-
     return { lineas, deudaTotalUSD: deudaAcumulada, totalAbonadoUSD: tUSD, totalAbonadoBs: tBS, propietario: resInfo };
   }, [filtroAptoTab2, pagosResidentes, propietarios]);
 
-  // --- FILTRADO EN TIEMPO REAL DE LA RECAUDACIÓN (PESTAÑA 3) ---
+  // --- FILTRADO PESTAÑA 3 ---
   const dataResidentesFiltrada = useMemo(() => {
     return pagosResidentes.filter(p => {
-      let fPagoFormateada = p.fecha_pago_real || '';
-      if(fPagoFormateada.includes('-')) {
-        const pt = fPagoFormateada.split('-');
-        if(pt[0].length === 4) fPagoFormateada = `${pt[2]}/${pt[1]}/${pt[0]}`;
-      }
-
       return (
-        (filtroAnio === '' || p.anio_correspondiente?.toString().trim() === filtroAnio.trim()) && 
-        (filtroMes === '' || p.mes_correspondiente?.toString().toLowerCase().trim() === filtroMes.toLowerCase().trim()) && 
         (filtroPiso === '' || p.piso?.toString().trim() === filtroPiso.trim()) && 
         (filtroApto === '' || p.apartamento?.toString().toLowerCase().trim() === filtroApto.toLowerCase().trim()) &&
-        (filtroFechaPagoReal === '' || fPagoFormateada.includes(filtroFechaPagoReal) || (p.fecha_pago_real && p.fecha_pago_real.includes(filtroFechaPagoReal)))
+        (filtroFechaPagoReal === '' || p.fecha_pago_real === filtroFechaPagoReal)
       );
     });
-  }, [pagosResidentes, filtroAnio, filtroMes, filtroPiso, filtroApto, filtroFechaPagoReal]);
+  }, [pagosResidentes, filtroPiso, filtroApto, filtroFechaPagoReal]);
 
-  // --- SUMATORIA EN VIVO PARA LA BÚSQUEDA FILTRADA DE LA PESTAÑA 3 ---
   const sumasTablaRecaudacion = useMemo(() => {
-    const usd = dataResidentesFiltrada.reduce((acc, item) => acc + Number(item.monto_pagado_usd || 0), 0);
-    const bs = dataResidentesFiltrada.reduce((acc, item) => acc + Number(item.monto_pagado_bs || 0), 0);
-    return { usd, bs };
+    return {
+      usd: dataResidentesFiltrada.reduce((acc, item) => acc + Number(item.monto_pagado_usd || 0), 0),
+      bs: dataResidentesFiltrada.reduce((acc, item) => acc + Number(item.monto_pagado_bs || 0), 0)
+    };
   }, [dataResidentesFiltrada]);
 
-  // --- FILTRADO ESTILO EXCEL PARA EL LIBRO DIARIO (PESTAÑA 4) ---
+  // --- FILTRADO PESTAÑA 4 ---
   const libroDiarioFiltrado = useMemo(() => {
     return libroDiarioConsolidado.filter(t => 
       (filtroAnioTab4 === '' || t.anio?.toString().trim() === filtroAnioTab4.trim()) &&
@@ -430,7 +365,20 @@ export default function ERPTorreD10() {
     );
   }, [libroDiarioConsolidado, filtroAnioTab4, filtroMesTab4]);
 
-  const transaccionesMesTab5 = libroDiarioConsolidado.filter(t => t.mes === filtroMesTab5 && t.anio?.toString() === filtroAnioTab5);
+  const sumasLibroDiario = useMemo(() => {
+    return {
+      ingresoUSD: libroDiarioFiltrado.reduce((acc, t) => acc + Number(t.ingreso_usd || 0), 0),
+      gastoUSD: libroDiarioFiltrado.reduce((acc, t) => acc + Number(t.gasto_usd || 0), 0),
+      ingresoBs: libroDiarioFiltrado.reduce((acc, t) => acc + Number(t.ingreso_bs || 0), 0),
+      gastoBs: libroDiarioFiltrado.reduce((acc, t) => acc + Number(t.gasto_bs || 0), 0)
+    };
+  }, [libroDiarioFiltrado]);
+
+  // --- FILTRADO PESTAÑA 5 ---
+  const transaccionesMesTab5 = libroDiarioConsolidado.filter(t => 
+    (filtroMesTab5 === 'TODOS' || t.mes === filtroMesTab5) && 
+    (filtroAnioTab5 === 'TODOS' || t.anio?.toString() === filtroAnioTab5)
+  );
   const mIngUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_usd), 0), mGstUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
   const mIngBS = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_bs), 0), mGstBS = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
 
@@ -438,8 +386,11 @@ export default function ERPTorreD10() {
 
   if (!isAuth) {
     return (
-      <div className="min-h-screen bg-emerald-950 flex items-center justify-center p-4">
-        <form onSubmit={handleLoginSubmit} className="bg-emerald-900 border border-emerald-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
+      <div 
+        className="min-h-screen flex items-center justify-center p-4 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "linear-gradient(rgba(2, 6, 23, 0.88), rgba(2, 6, 23, 0.95)), url('https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=1920')" }}
+      >
+        <form onSubmit={handleLoginSubmit} className="bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl w-full max-w-sm relative z-10">
           <h1 className="text-xl font-bold text-center text-white uppercase tracking-widest mb-6">Torre D-10 ERP</h1>
           <input type="password" placeholder="Clave Tesorería" className="w-full bg-slate-950 border border-emerald-700 text-center rounded-lg p-3 text-white font-mono font-bold tracking-widest mb-6 outline-none focus:border-emerald-400" value={pin} onChange={e => setPin(e.target.value)} />
           <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3 rounded-lg uppercase text-xs tracking-wider transition-all">Ingresar al Sistema</button>
@@ -449,26 +400,51 @@ export default function ERPTorreD10() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-12">
+    <div 
+      className="min-h-screen text-slate-100 font-sans antialiased pb-12 bg-cover bg-center bg-no-repeat bg-fixed"
+      style={{ backgroundImage: "linear-gradient(rgba(2, 6, 23, 0.88), rgba(2, 6, 23, 0.95)), url('https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=1920')" }}
+    >
+      <style>{`
+        @media print {
+          @page { size: letter portrait; margin: 1.2cm; }
+          body { background-color: white !important; color: black !important; background-image: none !important; }
+          .no-print { display: none !important; }
+          .print-area { display: block !important; width: 100% !important; background: white !important; color: black !important; }
+          .page-header-print { display: flex !important; flex-direction: column !important; margin-bottom: 15px; border-b: 2px solid black; padding-bottom: 8px; }
+          .print-table th { background-color: #f3f4f6 !important; color: black !important; border: 1px solid #d1d5db !important; }
+          .print-table td { border: 1px solid #e5e7eb !important; color: black !important; }
+        }
+        .page-header-print { display: none; }
+      `}</style>
       
-      {/* HEADER PRINCIPAL */}
-      <header className="no-print bg-emerald-900 border-b border-emerald-800 py-4 px-6 sticky top-0 z-40 shadow-xl bg-opacity-95 backdrop-blur-sm">
+      <header className="no-print border-b border-slate-800/60 py-4 px-6 sticky top-0 z-40 shadow-xl bg-slate-950/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex flex-col gap-4">
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-3">
               <span className="text-2xl">🏛️</span>
-              <div><h1 className="text-sm font-bold text-white uppercase tracking-widest">Torre D-10</h1><h2 className="text-[10px] text-emerald-300 uppercase tracking-widest">Enterprise Resource Planning</h2></div>
+              <div>
+                <h1 className="text-sm font-bold text-white uppercase tracking-widest">Torre D-10</h1>
+                <h2 className="text-[10px] text-emerald-400 uppercase tracking-widest leading-tight mt-0.5">
+                  DESARROLLO HABITACIONAL CIUDAD TIUNA "SECTOR SIMÓN BOLÍVAR" DISTRITO CAPITAL SECTOR D TORRE D-10
+                </h2>
+              </div>
             </div>
-            <div className="text-center"><span className="bg-emerald-950 text-emerald-400 text-[10px] px-3 py-1 rounded-full border border-emerald-800 font-mono tracking-widest">CONTABILIDAD SINCRONIZADA</span></div>
-            <div><button onClick={handleLogout} className="text-[9px] bg-emerald-950 text-emerald-300 hover:bg-emerald-800 hover:text-white px-3 py-1.5 rounded font-bold uppercase tracking-widest border border-emerald-800 transition-all">Cerrar Sesión</button></div>
+            <div>
+              <button onClick={handleLogout} className="text-[9px] bg-slate-900 text-emerald-400 hover:bg-emerald-800 hover:text-white px-3 py-1.5 rounded font-bold uppercase tracking-widest border border-slate-700 hover:border-emerald-700 transition-all">
+                Cerrar Sesión
+              </button>
+            </div>
           </div>
-          
-          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 overflow-x-auto gap-1 custom-scrollbar">
+          <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-800 overflow-x-auto gap-1 custom-scrollbar">
             {[
-              { id: 'RESUMEN', label: '1. Resumen' }, { id: 'BUSQUEDA', label: '2. Estado de Cuenta' }, { id: 'BASE_DATOS', label: '3. Recaudación' }, 
-              { id: 'GASTOS_GRAL', label: '4. Libro Diario' }, { id: 'GASTOS_MENSUAL', label: '5. Cierre Mensual' }, { id: 'GESTION_DATOS', label: '6. Gestión de Datos' }
+              { id: 'RESUMEN', label: '1. Resumen' }, 
+              { id: 'BUSQUEDA', label: '2. Estado de Cuenta' }, 
+              { id: 'BASE_DATOS', label: '3. Recaudación' }, 
+              { id: 'GASTOS_GRAL', label: '4. Relacion de Gastos' }, 
+              { id: 'GASTOS_MENSUAL', label: '5. Cierre Mensual' }, 
+              { id: 'GESTION_DATOS', label: '6. Gestión de Datos' }
             ].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-none py-2 px-4 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${activeTab === tab.id ? 'bg-emerald-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}>{tab.label}</button>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-none py-2 px-4 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${activeTab === tab.id ? 'bg-emerald-800 text-white' : 'text-slate-400 hover:text-slate-200'}`}>{tab.label}</button>
             ))}
           </div>
         </div>
@@ -476,105 +452,63 @@ export default function ERPTorreD10() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8">
         
-        {/* PESTAÑA 1: RESUMEN FINANCIERO CON FILTROS COMBINADOS MES Y AÑO */}
+        {/* PESTAÑA 1 */}
         {activeTab === 'RESUMEN' && (
           <div className="space-y-6 no-print">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-              <h2 className="text-xl font-bold text-slate-300">Resumen Financiero Operativo</h2>
+              <h2 className="text-xl font-bold text-slate-200">Resumen Financiero Operativo</h2>
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-slate-400 uppercase font-bold">Año Ejercicio:</label>
-                  <select value={filtroAnioTab1} onChange={e => setFiltroAnioTab1(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400 focus:outline-none">
-                    <option value="TODOS">Todos los Años</option>
-                    {listaAniosFiltro.map(a => <option key={a} value={a}>Año {a}</option>)}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-slate-400 uppercase font-bold">Mes:</label>
-                  <select value={filtroMesTab1} onChange={e => setFiltroMesTab1(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded text-xs text-emerald-400 font-bold focus:outline-none">
-                    <option value="TODOS">Todos los Meses</option>
-                    {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
+                <div className="flex items-center gap-2"><label className="text-[10px] text-slate-400 uppercase font-bold">Año Ejercicio:</label><select value={filtroAnioTab1} onChange={e => setFiltroAnioTab1(e.target.value)} className="p-2 bg-slate-900/80 border border-slate-800 rounded text-xs font-mono text-emerald-400 focus:outline-none"><option value="TODOS">Todos los Años</option>{listaAniosFiltro.map(a => <option key={a} value={a}>Año {a}</option>)}</select></div>
+                <div className="flex items-center gap-2"><label className="text-[10px] text-slate-400 uppercase font-bold">Mes:</label><select value={filtroMesTab1} onChange={e => setFiltroMesTab1(e.target.value)} className="p-2 bg-slate-900/80 border border-slate-800 rounded text-xs text-emerald-400 font-bold focus:outline-none"><option value="TODOS">Todos los Meses</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
               </div>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Ingresos de Caja USD</p><p className="text-2xl font-mono font-bold text-emerald-400">${formatMoney(finanzasTab1Calculadas.ingresoUSD)}</p></div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Egresos de Caja USD</p><p className="text-2xl font-mono font-bold text-red-400">${formatMoney(finanzasTab1Calculadas.gastoUSD)}</p></div>
-              <div className="bg-emerald-950 p-6 rounded-xl border border-emerald-800 bg-opacity-30"><p className="text-[10px] text-emerald-400 uppercase font-bold mb-1">Balance Neto USD</p><p className="text-3xl font-mono font-bold text-white">${formatMoney(finanzasTab1Calculadas.saldoUSD)}</p></div>
+              <div className="bg-slate-900/80 p-6 rounded-xl border border-slate-800 backdrop-blur-sm"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Ingresos de Caja USD</p><p className="text-2xl font-mono font-bold text-emerald-400">${formatMoney(finanzasTab1Calculadas.ingresoUSD)}</p></div>
+              <div className="bg-slate-900/80 p-6 rounded-xl border border-slate-800 backdrop-blur-sm"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Egresos de Caja USD</p><p className="text-2xl font-mono font-bold text-red-400">${formatMoney(finanzasTab1Calculadas.gastoUSD)}</p></div>
+              <div className="bg-emerald-950/60 p-6 rounded-xl border border-emerald-800/50 backdrop-blur-sm"><p className="text-[10px] text-emerald-400 uppercase font-bold mb-1">Balance Neto USD</p><p className="text-3xl font-mono font-bold text-white">${formatMoney(finanzasTab1Calculadas.saldoUSD)}</p></div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Ingresos de Caja Bs</p><p className="text-2xl font-mono font-bold text-emerald-400">Bs {formatMoney(finanzasTab1Calculadas.ingresoBs)}</p></div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Egresos de Caja Bs</p><p className="text-2xl font-mono font-bold text-red-400">Bs {formatMoney(finanzasTab1Calculadas.gastoBs)}</p></div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Balance Neto Bs</p><p className="text-3xl font-mono font-bold text-amber-500">Bs {formatMoney(finanzasTab1Calculadas.saldoBs)}</p></div>
+              <div className="bg-slate-900/80 p-6 rounded-xl border border-slate-800 backdrop-blur-sm"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Ingresos de Caja Bs</p><p className="text-2xl font-mono font-bold text-emerald-400">Bs {formatMoney(finanzasTab1Calculadas.ingresoBs)}</p></div>
+              <div className="bg-slate-900/80 p-6 rounded-xl border border-slate-800 backdrop-blur-sm"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Egresos de Caja Bs</p><p className="text-2xl font-mono font-bold text-red-400">Bs {formatMoney(finanzasTab1Calculadas.gastoBs)}</p></div>
+              <div className="bg-slate-900/80 p-6 rounded-xl border border-slate-800 backdrop-blur-sm"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Balance Neto Bs</p><p className="text-3xl font-mono font-bold text-amber-500">Bs {formatMoney(finanzasTab1Calculadas.saldoBs)}</p></div>
             </div>
           </div>
         )}
 
-        {/* PESTAÑA 2: ESTADO DE CUENTA */}
+        {/* PESTAÑA 2 */}
         {activeTab === 'BUSQUEDA' && (
           <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-800 pb-2">
-              <h2 className="text-xl font-bold text-slate-300">Estado de Cuenta Propietarios Torre D - 10</h2>
+              <h2 className="text-xl font-bold text-slate-200">Estado de Cuenta Propietarios</h2>
+              {filtroAptoTab2 && (
+                <button onClick={() => handlePrint(`Estado Cuenta Apto ${filtroAptoTab2}`)} className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded text-xs uppercase tracking-widest transition-all shadow-md">
+                  🖨️ Imprimir Estado
+                </button>
+              )}
             </div>
             
-            <div className="no-print bg-slate-900 p-6 rounded-xl border border-slate-800">
+            <div className="no-print bg-slate-900/80 p-6 rounded-xl border border-slate-800 backdrop-blur-sm">
               <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Seleccione Apartamento</label>
-              <select value={filtroAptoTab2} onChange={e => setFiltroAptoTab2(e.target.value)} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 w-64 transition-all">
-                <option value="">-- Buscar Apto --</option>
-                {listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+              <select value={filtroAptoTab2} onChange={e => setFiltroAptoTab2(e.target.value)} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-bold text-emerald-400 focus:outline-none focus:border-emerald-500 w-64 transition-all"><option value="">-- Buscar Apto --</option>{listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}</select>
             </div>
             
             {filtroAptoTab2 && (
-              <div className="bg-white text-black p-6 rounded-xl border border-gray-200 shadow-sm">
+              <div className="print-area bg-white text-black p-6 rounded-xl border border-gray-200 shadow-sm">
                 <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-4">
-                  <div>
-                    <h1 className="text-xl font-bold tracking-wider">TORRE D-10</h1>
-                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Estado de Cuenta Oficial de Procondominio</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold">APARTAMENTO {filtroAptoTab2}</p>
-                    <p className="text-[9px] text-gray-500 font-mono">Emisión: {new Date().toLocaleDateString()}</p>
-                  </div>
+                  <div><h1 className="text-xl font-bold tracking-wider">TORRE D-10</h1><p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Estado de Cuenta Oficial</p></div>
+                  <div className="text-right"><p className="text-lg font-bold">APARTAMENTO {filtroAptoTab2}</p><p className="text-[9px] text-gray-500 font-mono">Emisión: {new Date().toLocaleDateString()}</p></div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 border border-gray-300 p-3 rounded mb-4 text-xs text-gray-900">
-                  <div>
-                    <p className="mb-0.5"><strong className="font-bold">Propietario:</strong> {estadoDeCuentaGenerado.propietario?.propietario || 'No registrado en el censo'}</p>
-                    <p><strong className="font-bold">Cédula de Identidad:</strong> {estadoDeCuentaGenerado.propietario?.cedula ? `V-${estadoDeCuentaGenerado.propietario.cedula}` : 'Pendiente'}</p>
-                  </div>
-                  <div className="text-right">
-                    <p><strong className="font-bold">Fecha de Ingreso a la Torre:</strong> <span className="uppercase">{estadoDeCuentaGenerado.propietario?.inicio_mes || 'N/A'} {estadoDeCuentaGenerado.propietario?.inicio_ano || ''}</span></p>
-                  </div>
+                  <div><p className="mb-0.5"><strong className="font-bold">Propietario:</strong> {estadoDeCuentaGenerado.propietario?.propietario || 'No registrado en el censo'}</p><p><strong className="font-bold">Cédula de Identidad:</strong> {estadoDeCuentaGenerado.propietario?.cedula ? `V-${estadoDeCuentaGenerado.propietario.cedula}` : 'Pendiente'}</p></div>
+                  <div className="text-right"><p><strong className="font-bold">Fecha de Ingreso:</strong> <span className="uppercase">{estadoDeCuentaGenerado.propietario?.inicio_mes || 'N/A'} {estadoDeCuentaGenerado.propietario?.inicio_ano || ''}</span></p></div>
                 </div>
-
                 <div className="grid grid-cols-3 gap-4 mb-4 text-center">
-                  <div className="border border-red-300 bg-red-50 p-3 rounded">
-                    <p className="text-[9px] text-red-800 uppercase tracking-widest font-bold">Deuda Pendiente</p>
-                    <p className="text-xl font-mono font-bold text-red-700">${formatMoney(estadoDeCuentaGenerado.deudaTotalUSD)}</p>
-                  </div>
-                  <div className="border border-emerald-300 bg-emerald-50 p-3 rounded">
-                    <p className="text-[9px] text-emerald-800 uppercase tracking-widest font-bold">Abonado Total USD</p>
-                    <p className="text-xl font-mono font-bold text-emerald-700">${formatMoney(estadoDeCuentaGenerado.totalAbonadoUSD)}</p>
-                  </div>
-                  <div className="border border-gray-300 bg-gray-100 p-3 rounded">
-                    <p className="text-[9px] text-gray-700 uppercase tracking-widest font-bold">Abonado Total Bs</p>
-                    <p className="text-xl font-mono font-bold text-gray-800">Bs {formatMoney(estadoDeCuentaGenerado.totalAbonadoBs)}</p>
-                  </div>
+                  <div className="border border-red-300 bg-red-50 p-3 rounded"><p className="text-[9px] text-red-800 uppercase tracking-widest font-bold">Deuda Pendiente</p><p className="text-xl font-mono font-bold text-red-700">${formatMoney(estadoDeCuentaGenerado.deudaTotalUSD)}</p></div>
+                  <div className="border border-emerald-300 bg-emerald-50 p-3 rounded"><p className="text-[9px] text-emerald-800 uppercase tracking-widest font-bold">Abonado Total USD</p><p className="text-xl font-mono font-bold text-emerald-700">${formatMoney(estadoDeCuentaGenerado.totalAbonadoUSD)}</p></div>
+                  <div className="border border-gray-300 bg-gray-100 p-3 rounded"><p className="text-[9px] text-gray-700 uppercase tracking-widest font-bold">Abonado Total Bs</p><p className="text-xl font-mono font-bold text-gray-800">Bs {formatMoney(estadoDeCuentaGenerado.totalAbonadoBs)}</p></div>
                 </div>
-                
-                <table className="w-full text-left text-xs whitespace-nowrap">
-                  <thead className="bg-gray-800 text-white font-mono uppercase text-[9px]">
-                    <tr>
-                      <th className="p-2.5">Mes Condominio</th>
-                      <th className="p-2.5">Estatus</th>
-                      <th className="p-2.5">Fecha Pago Real</th>
-                      <th className="p-2.5 text-right">Monto Cuota</th>
-                      <th className="p-2.5 text-right">Descripción / Historial Transacción</th>
-                    </tr>
-                  </thead>
+                <table className="w-full text-left text-xs whitespace-nowrap print-table">
+                  <thead className="bg-gray-800 text-white font-mono uppercase text-[9px]"><tr><th className="p-2.5">Mes Condominio</th><th className="p-2.5">Estatus</th><th className="p-2.5">Fecha Pago Real</th><th className="p-2.5 text-right">Monto Cuota</th><th className="p-2.5 text-right">Descripción / Transacción</th></tr></thead>
                   <tbody className="divide-y divide-gray-200">
                     {estadoDeCuentaGenerado.lineas.map((l, i) => (
                       <tr key={i} className={l.estatus === 'PENDIENTE' ? 'bg-red-50/50' : ''}>
@@ -592,128 +526,61 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 3: RECAUDACIÓN CON COLUMNAS OPTIMIZADAS Y BARRA DE SUMA EN VIVO */}
+        {/* PESTAÑA 3 */}
         {activeTab === 'BASE_DATOS' && (
           <div className="space-y-6 no-print">
-            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Mayor de Cobros Manuales</h2>
-            <form onSubmit={handleRegistrarPagoResidente} className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-              
-              <div className="mb-4 bg-slate-950 p-3 rounded-lg border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <input type="checkbox" id="autoCheck" checked={autoMesPendiente} onChange={e => setAutoMesPendiente(e.target.checked)} className="h-4 w-4 accent-emerald-500 cursor-pointer" />
-                  <label htmlFor="autoCheck" className="text-xs font-bold text-slate-300 uppercase cursor-pointer">
-                    Asignar automáticamente al mes cronológico pendiente más antiguo
-                  </label>
-                </div>
-                {autoMesPendiente && formPagoResidente.apartamento && (
-                  <span className="text-[10px] font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800 uppercase tracking-wider">
-                    Siguiente Periodo Detectado: {formPagoResidente.mes_seleccionado} - {formPagoResidente.anio_correspondiente}
-                  </span>
-                )}
+            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-200">Libro Mayor de Cobros Manuales</h2>
+            <form onSubmit={handleRegistrarPagoResidente} className="bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800">
+              <div className="mb-4 bg-slate-950/80 p-3 rounded-lg border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center space-x-3"><input type="checkbox" id="autoCheck" checked={autoMesPendiente} onChange={e => setAutoMesPendiente(e.target.checked)} className="h-4 w-4 accent-emerald-500 cursor-pointer" /><label htmlFor="autoCheck" className="text-xs font-bold text-slate-300 uppercase cursor-pointer">Asignar automáticamente al mes pendiente más antiguo</label></div>
+                {autoMesPendiente && formPagoResidente.apartamento && <span className="text-[10px] font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800 uppercase tracking-wider">Siguiente: {formPagoResidente.mes_seleccionado} - {formPagoResidente.anio_corresponding}</span>}
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Apartamento</label>
-                  <select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" required>
-                    <option value="">-- Elegir Apto --</option>
-                    {listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año de la Cuota</label>
-                  <select value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} disabled={autoMesPendiente} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none disabled:opacity-50">
-                    {listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Mes de la Cuota</label>
-                  <select value={formPagoResidente.mes_seleccionado} onChange={e => setFormPagoResidente({...formPagoResidente, mes_seleccionado: e.target.value})} disabled={autoMesPendiente} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none disabled:opacity-50">
-                    <option value="">-- Asignar Mes --</option>
-                    {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fecha de Pago</label>
-                  <input type="date" value={formPagoResidente.fecha_pago_real} onChange={e => setFormPagoResidente({...formPagoResidente, fecha_pago_real: e.target.value})} className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none cursor-pointer" required />
-                </div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Apartamento</label><select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" required><option value="">-- Elegir Apto --</option>{listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año de la Cuota</label><select value={formPagoResidente.anio_corresponding} onChange={e => setFormPagoResidente({...formPagoResidente, anio_corresponding: e.target.value})} disabled={autoMesPendiente} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none disabled:opacity-50">{listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Mes de la Cuota</label><select value={formPagoResidente.mes_seleccionado} onChange={e => setFormPagoResidente({...formPagoResidente, mes_seleccionado: e.target.value})} disabled={autoMesPendiente} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none disabled:opacity-50"><option value="">-- Asignar Mes --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fecha de Pago</label><input type="date" value={formPagoResidente.fecha_pago_real} onChange={e => setFormPagoResidente({...formPagoResidente, fecha_pago_real: e.target.value})} className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none cursor-pointer" required /></div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
                 <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado BS</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Descripción / Nomenclatura Manual del Pago</label><input type="text" placeholder="Ej: PAGO MES DE OCTUBRE 2023 - EFECTIVO RECAUDADO" value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" /></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Descripción / Nomenclatura Manual</label><input type="text" placeholder="Ej: PAGO OCTUBRE 2023 - REF 1234" value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" /></div>
               </div>
               <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Registrar Cobro</button></div>
             </form>
 
-            {/* BARRA EXCEL: FILTROS CENTRALIZADOS Y TOTALIZADOR DE BÚSQUEDA EN CALIENTE */}
-            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-wrap gap-4 items-center justify-between shadow-lg">
+            <div className="bg-slate-900/90 backdrop-blur-md p-4 rounded-xl border border-slate-800 flex flex-wrap gap-4 items-center justify-between shadow-lg">
               <div className="flex flex-wrap gap-2.5 items-center">
-                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800">Filtros Avanzados Excel</span>
-                <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 font-sans outline-none">
-                  <option value="">Piso (Todos)</option>
-                  {listaPisos.map(p => <option key={p} value={p}>Piso {p}</option>)}
+                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800">Filtros Activos</span>
+                <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 font-sans outline-none"><option value="">Piso (Todos)</option>{listaPisos.map(p => <option key={p} value={p}>Piso {p}</option>)}</select>
+                <select value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-emerald-400 font-bold outline-none"><option value="">Apto (Todos)</option>{listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}</select>
+                <select value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-amber-400 font-bold outline-none font-mono">
+                  <option value="">Fecha de Pago (Todas)</option>
+                  {listaFechasPagoPestaña3.map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
-                <select value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-emerald-400 font-bold outline-none">
-                  <option value="">Apto (Todos)</option>
-                  {listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-                <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 outline-none">
-                  <option value="">Mes Condominio (Todos)</option>
-                  {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-                <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 outline-none">
-                  <option value="">Año (Todos)</option>
-                  {listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}
-                </select>
-                <input type="text" placeholder="🔍 Buscar por Fecha Pago..." value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-white outline-none w-44 font-mono" />
               </div>
-              
-              {/* SUMA DINÁMICA DE LA BÚSQUEDA */}
               <div className="bg-slate-950 px-4 py-2 rounded-lg border border-emerald-900/50 flex gap-4 text-xs font-mono shadow-inner">
-                <div>
-                  <span className="text-slate-500 uppercase text-[9px] font-bold block tracking-wider">Total Filtro USD</span>
-                  <span className="text-emerald-400 font-bold text-sm">${formatMoney(sumasTablaRecaudacion.usd)}</span>
-                </div>
-                <div className="border-l border-slate-800 pl-4">
-                  <span className="text-slate-500 uppercase text-[9px] font-bold block tracking-wider">Total Filtro Bs</span>
-                  <span className="text-emerald-400 font-bold text-sm">Bs {formatMoney(sumasTablaRecaudacion.bs)}</span>
-                </div>
+                <div><span className="text-slate-500 uppercase text-[9px] font-bold block tracking-wider">Total Filtro USD</span><span className="text-emerald-400 font-bold text-sm">${formatMoney(sumasTablaRecaudacion.usd)}</span></div>
+                <div className="border-l border-slate-800 pl-4"><span className="text-slate-500 uppercase text-[9px] font-bold block tracking-wider">Total Filtro Bs</span><span className="text-emerald-400 font-bold text-sm">Bs {formatMoney(sumasTablaRecaudacion.bs)}</span></div>
               </div>
             </div>
 
-            {/* TABLA LIMPIA Y REAJUSTADA PARA PANTALLA UNIFICADA */}
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
+            <div className="bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
               <table className="w-full text-left text-xs table-fixed">
-                <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px] border-b border-slate-800">
-                  <tr>
-                    <th className="p-4 w-16">Piso</th>
-                    <th className="p-4 w-24">Apto</th>
-                    <th className="p-4 w-32">Fecha de Pago</th>
-                    <th className="p-4 w-auto">Descripción / Nomenclatura Completa</th>
-                    <th className="p-4 text-right w-24">Abono USD</th>
-                    <th className="p-4 text-right w-28">Abono Bs</th>
-                    <th className="p-4 text-center w-20">Acción</th>
-                  </tr>
+                <thead className="bg-slate-950/80 text-slate-400 font-mono uppercase text-[9px] border-b border-slate-800">
+                  <tr><th className="p-4 w-16">Piso</th><th className="p-4 w-24">Apto</th><th className="p-4 w-32">Fecha Pago</th><th className="p-4 w-auto">Descripción / Nomenclatura Completa</th><th className="p-4 text-right w-24">Abono USD</th><th className="p-4 text-right w-28">Abono Bs</th><th className="p-4 text-center w-20">Acción</th></tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {dataResidentesFiltrada.length === 0 ? (
-                    <tr><td colSpan={7} className="p-6 text-center text-slate-500 font-mono">No existen abonos registrados que coincidan con la búsqueda.</td></tr>
-                  ) : (
+                <tbody className="divide-y divide-slate-800/60">
+                  {dataResidentesFiltrada.length === 0 ? (<tr><td colSpan={7} className="p-6 text-center text-slate-500 font-mono">No existen abonos que coincidan.</td></tr>) : (
                     dataResidentesFiltrada.map(item => (
                       <tr key={item.id} className="hover:bg-slate-800/40 align-top">
                         <td className="p-4 font-mono text-slate-400">{item.piso}</td>
                         <td className="p-4 font-bold text-emerald-400">{item.apartamento}</td>
                         <td className="p-4 font-mono text-slate-300">{item.fecha_pago_real}</td>
-                        <td className="p-4 text-slate-300 text-[11px] font-mono whitespace-normal break-words leading-relaxed">
-                          {item.descripcion}
-                        </td>
+                        <td className="p-4 text-slate-300 text-[11px] font-mono whitespace-normal break-words leading-relaxed">{item.descripcion}</td>
                         <td className="p-4 text-right font-mono font-bold text-emerald-400">${formatMoney(item.monto_pagado_usd)}</td>
                         <td className="p-4 text-right font-mono font-bold text-emerald-400">Bs {formatMoney(item.monto_pagado_bs)}</td>
-                        <td className="p-4 text-center">
-                          <button onClick={() => handleEliminarPagoResidente(item.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button>
-                        </td>
+                        <td className="p-4 text-center"><button onClick={() => handleEliminarPagoResidente(item.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button></td>
                       </tr>
                     ))
                   )}
@@ -723,58 +590,51 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 4: LIBRO DIARIO CON FILTROS INTEGRADAS EN EL TÍTULO */}
+        {/* PESTAÑA 4 - RELACION DE GASTOS */}
         {activeTab === 'GASTOS_GRAL' && (
           <div className="space-y-6 no-print">
-            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Diario de Caja Operativo</h2>
-            <form onSubmit={handleRegistrarMovimiento} className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-200">Relacion de Gastos Mensual</h2>
+            <form onSubmit={handleRegistrarMovimiento} className="bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <input type="text" placeholder="Año" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required />
                 <select value={formGasto.mes} onChange={e => setFormGasto({...formGasto, mes: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required><option value="">-- Mes Contable --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select>
                 <input type="text" placeholder="Factura Ref" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" />
                 <input type="text" placeholder="Descripción del Egreso" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 bg-red-950/10 p-4 rounded-lg border border-red-900/20">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 bg-red-950/20 p-4 rounded-lg border border-red-900/30">
                 <div><label className="block text-[10px] font-bold text-red-400 mb-1">Salida USD (-)</label><input type="number" step="0.01" value={formGasto.gasto_usd} onChange={e => setFormGasto({...formGasto, gasto_usd: e.target.value})} className="w-full p-3 bg-slate-950 border border-red-900/50 rounded-lg text-sm text-white font-mono focus:border-red-500 outline-none" /></div>
                 <div><label className="block text-[10px] font-bold text-red-400 mb-1">Salida Bs (-)</label><input type="number" step="0.01" value={formGasto.gasto_bs} onChange={e => setFormGasto({...formGasto, gasto_bs: e.target.value})} className="w-full p-3 bg-slate-950 border border-red-900/50 rounded-lg text-sm text-white font-mono focus:border-red-500 outline-none" /></div>
               </div>
               <div className="flex justify-end"><button type="submit" className="bg-red-800 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Cargar Egreso</button></div>
             </form>
 
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
+            <div className="bg-slate-950/80 backdrop-blur-md p-4 rounded-xl border border-emerald-900/40 flex flex-wrap gap-6 items-center justify-start shadow-inner">
+               <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">Totales de Búsqueda:</span>
+               <div className="flex gap-4 text-xs font-mono">
+                 <div><span className="text-slate-500 uppercase text-[9px] font-bold block">Ingreso USD</span><span className="text-emerald-400 font-bold">${formatMoney(sumasLibroDiario.ingresoUSD)}</span></div>
+                 <div><span className="text-slate-500 uppercase text-[9px] font-bold block">Gasto USD</span><span className="text-red-400 font-bold">${formatMoney(sumasLibroDiario.gastoUSD)}</span></div>
+                 <div className="border-l border-slate-800 pl-4"><span className="text-slate-500 uppercase text-[9px] font-bold block">Ingreso Bs</span><span className="text-emerald-400 font-bold">Bs {formatMoney(sumasLibroDiario.ingresoBs)}</span></div>
+                 <div><span className="text-slate-500 uppercase text-[9px] font-bold block">Gasto Bs</span><span className="text-red-400 font-bold">Bs {formatMoney(sumasLibroDiario.gastoBs)}</span></div>
+               </div>
+            </div>
+
+            <div className="bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
                <table className="w-full text-left text-xs whitespace-nowrap">
-                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]">
+                 <thead className="bg-slate-950/80 text-slate-400 font-mono uppercase text-[9px]">
                    <tr>
-                     {/* ENCABEZADO CON FILTROS INTEGRADOS SOLICITADOS */}
                      <th className="p-4 w-48 bg-slate-900/60 border-r border-slate-800">
-                       <div className="space-y-1">
-                         <span className="block text-slate-400">Periodo Contable</span>
+                       <div className="space-y-1"><span className="block text-slate-400">Periodo Contable</span>
                          <div className="flex gap-1">
-                           <select value={filtroAnioTab4} onChange={e => setFiltroAnioTab4(e.target.value)} className="p-1 bg-slate-950 border border-slate-700 rounded text-[9px] text-white outline-none font-sans normal-case">
-                             <option value="">Año (Todos)</option>
-                             {listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}
-                           </select>
-                           <select value={filtroMesTab4} onChange={e => setFiltroMesTab4(e.target.value)} className="p-1 bg-slate-950 border border-slate-700 rounded text-[9px] text-white outline-none font-sans normal-case">
-                             <option value="">Mes (Todos)</option>
-                             {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
-                           </select>
+                           <select value={filtroAnioTab4} onChange={e => setFiltroAnioTab4(e.target.value)} className="p-1 bg-slate-950 border border-slate-700 rounded text-[9px] text-white outline-none font-sans normal-case"><option value="">Año (Todos)</option>{listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}</select>
+                           <select value={filtroMesTab4} onChange={e => setFiltroMesTab4(e.target.value)} className="p-1 bg-slate-950 border border-slate-700 rounded text-[9px] text-white outline-none font-sans normal-case"><option value="">Mes (Todos)</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select>
                          </div>
                        </div>
                      </th>
-                     <th className="p-4">Descripción / Unidad Ref</th>
-                     <th className="p-4 text-right text-emerald-400">Ingreso $</th>
-                     <th className="p-4 text-right text-red-400">Gasto $</th>
-                     <th className="p-4 text-right font-bold">Saldo Caja $</th>
-                     <th className="p-4 text-right text-emerald-400">Ingreso Bs</th>
-                     <th className="p-4 text-right text-red-400">Gasto Bs</th>
-                     <th className="p-4 text-right font-bold">Saldo Caja Bs</th>
-                     <th className="p-4 text-center">Acciones</th>
+                     <th className="p-4">Descripción / Unidad Ref</th><th className="p-4 text-right text-emerald-400">Ingreso $</th><th className="p-4 text-right text-red-400">Gasto $</th><th className="p-4 text-right font-bold">Saldo Caja $</th><th className="p-4 text-right text-emerald-400">Ingreso Bs</th><th className="p-4 text-right text-red-400">Gasto Bs</th><th className="p-4 text-right font-bold">Saldo Caja Bs</th><th className="p-4 text-center">Acciones</th>
                    </tr>
                  </thead>
-                 <tbody className="divide-y divide-slate-800">
-                    {libroDiarioFiltrado.length === 0 ? (
-                      <tr><td colSpan={9} className="p-6 text-center text-slate-500 font-mono">No existen movimientos que coincidan con el periodo filtrado.</td></tr>
-                    ) : (
+                 <tbody className="divide-y divide-slate-800/60">
+                    {libroDiarioFiltrado.length === 0 ? (<tr><td colSpan={9} className="p-6 text-center text-slate-500 font-mono">No existen movimientos que coincidan con el periodo filtrado.</td></tr>) : (
                       libroDiarioFiltrado.map((t, index) => (
                         <tr key={index} className="hover:bg-slate-800/40">
                           <td className="p-4 font-mono border-r border-slate-800/60"><span className="font-bold text-white">{t.anio}</span> <span className="text-slate-400 text-[10px]">{t.mes}</span></td>
@@ -785,9 +645,7 @@ export default function ERPTorreD10() {
                           <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
                           <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
                           <td className="p-4 text-right font-mono font-bold bg-slate-950/40 text-slate-100">{formatMoney(t.saldo_bs)}</td>
-                          <td className="p-4 text-center">
-                            <button onClick={() => handleEliminarTransaccion(t.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button>
-                          </td>
+                          <td className="p-4 text-center"><button onClick={() => handleEliminarTransaccion(t.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button></td>
                         </tr>
                       ))
                     )}
@@ -797,13 +655,36 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 5: CIERRE MENSUAL */}
+        {/* PESTAÑA 5 */}
         {activeTab === 'GASTOS_MENSUAL' && (
           <div className="space-y-6 no-print">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2"><h2 className="text-xl font-bold text-slate-300">Cierre Contable Mensual</h2></div>
-            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 flex gap-4"><div className="w-1/4"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año</label><input type="text" value={filtroAnioTab5} onChange={e => setFiltroAnioTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 outline-none" /></div><div className="w-1/3"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Seleccione Mes</label><select value={filtroMesTab5} onChange={e => setFiltroMesTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-bold text-white focus:border-emerald-500 outline-none"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select></div></div>
-            {filtroMesTab5 && (
-              <div className="bg-white text-black p-8 rounded-xl border border-gray-200">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="text-xl font-bold text-slate-200">Cierre Contable Mensual</h2>
+              {filtroMesTab5 && filtroAnioTab5 && (
+                <button onClick={() => handlePrint(`Cierre Mensual - ${filtroMesTab5} ${filtroAnioTab5}`)} className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded text-xs uppercase tracking-widest shadow-md transition-all">
+                  🖨️ Imprimir Cierre
+                </button>
+              )}
+            </div>
+            <div className="bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800 flex gap-4">
+              <div className="w-1/4">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año</label>
+                <select value={filtroAnioTab5} onChange={e => setFiltroAnioTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 outline-none">
+                  <option value="TODOS">Todos los Años</option>
+                  {listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div className="w-1/3">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Seleccione Mes</label>
+                <select value={filtroMesTab5} onChange={e => setFiltroMesTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-bold text-white focus:border-emerald-500 outline-none">
+                  <option value="TODOS">Todos los Meses</option>
+                  {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            </div>
+            
+            {(filtroMesTab5 || filtroAnioTab5) && (
+              <div className="print-area bg-white text-black p-8 rounded-xl border border-gray-200">
                 <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-start">
                   <div><h1 className="text-xl font-bold uppercase tracking-wider">TORRE D-10</h1><p className="text-xs text-gray-600 font-bold uppercase mt-1">Cierre de Flujo de Caja</p></div>
                   <div className="text-right"><p className="text-lg font-bold uppercase">{filtroMesTab5} {filtroAnioTab5}</p><p className="text-[10px] text-gray-500 font-mono">Generado: {new Date().toLocaleDateString()}</p></div>
@@ -818,12 +699,12 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 6: GESTIÓN DE DATOS */}
+        {/* PESTAÑA 6 */}
         {activeTab === 'GESTION_DATOS' && (
           <div className="no-print flex flex-col gap-6 animate-fadeIn">
-            <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+            <div className="flex flex-wrap gap-1.5 pb-2">
               {listaPisos.map(p => (
-                <button key={p} onClick={() => setPisoActivoTab6(p)} className={`px-5 py-2.5 flex-none rounded-xl text-xs font-bold tracking-wider uppercase transition-all shadow-sm ${pisoActivoTab6 === p ? 'bg-emerald-800 text-white shadow-md' : 'bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800'}`}>
+                <button key={p} onClick={() => setPisoActivoTab6(p)} className={`px-3 py-1.5 flex-none rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all shadow-sm ${pisoActivoTab6 === p ? 'bg-emerald-800 text-white shadow-md' : 'bg-slate-900/80 backdrop-blur-sm text-slate-400 border border-slate-800 hover:bg-slate-800'}`}>
                   Piso {p}
                 </button>
               ))}
@@ -833,19 +714,16 @@ export default function ERPTorreD10() {
                 const nombre = item.propietario?.trim().toLowerCase() || '';
                 const vacio = (nombre === '' || nombre === 'vacío' || nombre === 'vacio');
                 return (
-                  <div key={item.id} className="p-5 rounded-xl border border-slate-800 bg-slate-900 flex flex-col justify-between hover:border-slate-700 transition-colors">
+                  <div key={item.id} className="p-5 rounded-xl border border-slate-800 bg-slate-900/80 backdrop-blur-sm flex flex-col justify-between hover:border-slate-700 transition-colors">
                     <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <span className="text-xl font-bold text-white">Apto {item.apartamento} <span className="text-xs text-slate-500 font-mono ml-2">(Piso {item.piso})</span></span>
-                        <span className="text-xs font-medium text-emerald-400 block uppercase mt-0.5">{item.propietario || 'Sin registro en censo'}</span>
-                      </div>
+                      <div><span className="text-xl font-bold text-white">Apto {item.apartamento} <span className="text-xs text-slate-500 font-mono ml-2">(Piso {item.piso})</span></span><span className="text-xs font-medium text-emerald-400 block uppercase mt-0.5">{item.propietario || 'Sin registro en censo'}</span></div>
                       <span className={`text-[9px] font-mono uppercase tracking-widest px-2.5 py-1 rounded border ${vacio ? 'bg-red-950/40 text-red-400 border-red-900/40' : 'bg-emerald-950/40 text-emerald-400 border-emerald-900/40'}`}>{vacio ? 'Disponible' : 'Censado'}</span>
                     </div>
                     <div className="text-[11px] font-mono text-slate-400 space-y-1.5 border-t border-slate-800 pt-3 mb-4">
                       <div className="flex justify-between"><span>CÉDULA DE IDENTIDAD:</span><span className="text-slate-200 font-sans font-medium">{item.cedula ? `V-${item.cedula}` : 'Pendiente'}</span></div>
                       <div className="flex justify-between"><span>FECHA DE INGRESO A LA TORRE:</span><span className="text-slate-200 font-sans font-medium uppercase">{item.inicio_mes ? `${item.inicio_mes} ${item.inicio_ano}` : 'Pendiente'}</span></div>
                     </div>
-                    <button onClick={() => setEditingProp(item)} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-lg text-xs uppercase border border-slate-700 transition-colors">Modificar Registro</button>
+                    <button onClick={() => setEditingProp(item)} className="w-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-lg text-xs uppercase border border-slate-700 transition-colors">Modificar Registro</button>
                   </div>
                 );
               })}
@@ -855,8 +733,8 @@ export default function ERPTorreD10() {
 
         {/* MODAL EDICIÓN CENSO */}
         {editingProp && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 no-print">
-            <form onSubmit={handleSavePropietario} className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md space-y-4">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 no-print">
+            <form onSubmit={handleSavePropietario} className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
               <h3 className="text-base font-bold uppercase text-white border-b border-slate-800 pb-2">Editar Apartamento {editingProp.apartamento}</h3>
               <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Nombre Completo del Propietario</label><input type="text" value={editingProp.propietario || ''} onChange={e => setEditingProp({...editingProp, propietario: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white" /></div>
               <div className="grid grid-cols-2 gap-4">
@@ -864,12 +742,12 @@ export default function ERPTorreD10() {
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Piso</label><input type="text" value={editingProp.piso || ''} onChange={e => setEditingProp({...editingProp, piso: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white capitalize">{<option value="">-- Mes --</option>}{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Año de Ingreso</label><select value={editingProp.inicio_ano || ''} onChange={e => setEditingProp({...editingProp, inicio_ano: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white">{<option value="">-- Año --</option>}{listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white capitalize"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Año de Ingreso</label><select value={editingProp.inicio_ano || ''} onChange={e => setEditingProp({...editingProp, inicio_ano: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white"><option value="">-- Año --</option>{listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setEditingProp(null)} className="flex-1 bg-slate-800 text-slate-300 font-bold py-3 rounded-lg text-xs uppercase border border-slate-700">Cerrar</button>
-                <button type="submit" className="flex-1 bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg text-xs uppercase shadow-lg">Guardar Cambios</button>
+                <button type="button" onClick={() => setEditingProp(null)} className="flex-1 bg-slate-800 text-slate-300 font-bold py-3 rounded-lg text-xs uppercase border border-slate-700 hover:bg-slate-700 transition-all">Cerrar</button>
+                <button type="submit" className="flex-1 bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg text-xs uppercase shadow-lg transition-all">Guardar Cambios</button>
               </div>
             </form>
           </div>

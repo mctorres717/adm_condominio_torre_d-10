@@ -47,7 +47,7 @@ export default function ERPTorreD10() {
   // --- FILTROS TAB 2 Y 5 ---
   const [filtroAptoTab2, setFiltroAptoTab2] = useState('');
   const [filtroMesTab5, setFiltroMesTab5] = useState('TODOS');
-  const [filtroAnioTab5, setFiltroAnioTab5] = useState('TODOS'); // Corregido por defecto a "Todos los Años"
+  const [filtroAnioTab5, setFiltroAnioTab5] = useState('TODOS');
 
   // --- FILTROS TAB 6 (GESTIÓN) ---
   const [pisoActivoTab6, setPisoActivoTab6] = useState<string>('');
@@ -62,7 +62,6 @@ export default function ERPTorreD10() {
     return [...new Set(propietarios.map(p => p.piso?.toString()).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
   }, [propietarios]);
 
-  // FILTRO ORDENADO CRONOLÓGICAMENTE (De más antiguo a más reciente)
   const listaFechasPagoPestaña3 = useMemo(() => {
     const fechas = pagosResidentes.map(p => p.fecha_pago_real).filter(Boolean);
     return [...new Set(fechas)].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
@@ -100,7 +99,6 @@ export default function ERPTorreD10() {
     if (listaPisos.length > 0 && !pisoActivoTab6) setPisoActivoTab6(listaPisos[0]);
   }, [listaPisos, pisoActivoTab6]);
 
-  // --- AUTOMATIZADOR DE MES PENDIENTE ---
   const siguienteMesPendienteCalculado = useMemo(() => {
     if (!formPagoResidente.apartamento || !autoMesPendiente) return null;
     
@@ -156,51 +154,44 @@ export default function ERPTorreD10() {
     if (data) setPropietarios(data.sort((a, b) => a.apartamento.localeCompare(b.apartamento, undefined, { numeric: true, sensitivity: 'base' })));
   };
 
-  // --- MOTOR DE EXTRACCIÓN CRONOLÓGICO SEGURO (Buster antibugs de Enero) ---
+  // --- MOTOR DE EXTRACCIÓN DE FECHAS (PARSER ESTRICTO Y DEFINITIVO) ---
   const parseFechaPago = (fechaStr: string) => {
     if (!fechaStr) return { mesNombre: 'Enero', anioStr: '2025', mesIdx: 1 };
     
     const cleanStr = fechaStr.split('T')[0].trim();
-    const parts = cleanStr.split(/[-/]/);
+    let y = 2025, m = 1;
     
-    if (parts.length === 3) {
-      if (parts[0].length === 4) {
-        // Formato ISO estándar: YYYY-MM-DD
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10);
-        if (!isNaN(y) && !isNaN(m) && m >= 1 && m <= 12) {
-          return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
-        }
-      } else if (parts[2].length === 4) {
-        // Formato Latino/Americano: DD/MM/YYYY o MM/DD/YYYY
-        const y = parseInt(parts[2], 10);
-        const p0 = parseInt(parts[0], 10);
-        const p1 = parseInt(parts[1], 10);
-        
-        // Detección inteligente del patrón de inversión de meses (4, 8, 12 frente a día 1)
-        if (p0 <= 12 && p1 === 1 && (p0 === 4 || p0 === 8 || p0 === 12)) {
-          return { mesNombre: mesesDelAno[p0 - 1], anioStr: y.toString(), mesIdx: p0 };
-        }
-        if (!isNaN(p1) && p1 >= 1 && p1 <= 12) {
-          return { mesNombre: mesesDelAno[p1 - 1], anioStr: y.toString(), mesIdx: p1 };
-        }
-        if (!isNaN(p0) && p0 >= 1 && p0 <= 12) {
-          return { mesNombre: mesesDelAno[p0 - 1], anioStr: y.toString(), mesIdx: p0 };
-        }
-      }
+    if (cleanStr.includes('-') && cleanStr.split('-')[0].length === 4) {
+      // Formato YYYY-MM-DD
+      const pts = cleanStr.split('-');
+      y = parseInt(pts[0], 10);
+      m = parseInt(pts[1], 10);
+    } else if (cleanStr.includes('/') && cleanStr.split('/')[2].length === 4) {
+      // Formato Latino DD/MM/YYYY
+      const pts = cleanStr.split('/');
+      y = parseInt(pts[2], 10);
+      m = parseInt(pts[1], 10);
+    } else if (cleanStr.includes('-') && cleanStr.split('-')[2].length === 4) {
+       // Formato Latino DD-MM-YYYY
+      const pts = cleanStr.split('-');
+      y = parseInt(pts[2], 10);
+      m = parseInt(pts[1], 10);
+    } else {
+       // Fallback nativo
+       const dObj = new Date(cleanStr);
+       if (!isNaN(dObj.getTime())) {
+         y = dObj.getUTCFullYear();
+         m = dObj.getUTCMonth() + 1;
+       }
     }
     
-    const dObj = new Date(fechaStr);
-    if (!isNaN(dObj.getTime())) {
-      const y = dObj.getUTCFullYear();
-      const m = dObj.getUTCMonth() + 1;
-      return { mesNombre: mesesDelAno[m - 1] || 'Enero', anioStr: y.toString(), mesIdx: m };
+    if (!isNaN(y) && !isNaN(m) && m >= 1 && m <= 12) {
+       return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
     }
-    
     return { mesNombre: 'Enero', anioStr: '2025', mesIdx: 1 };
   };
 
-  // --- CORE DE CAJA CONSOLIDADO OPERATIVO ---
+  // --- CORE DE CAJA CONSOLIDADO ---
   const libroDiarioConsolidado = useMemo(() => {
     const ingresosAgrupados = new Map<string, { usd: number, bs: number, mesNombre: string, anioStr: string, mesIdx: number }>();
     
@@ -305,7 +296,6 @@ export default function ERPTorreD10() {
 
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
-  // --- FUNCCIÓN GLOBAL DE IMPRESIÓN ---
   const handlePrint = (titulo: string) => { window.print(); };
 
   // --- REDUCER PESTAÑA 1 ---
@@ -363,7 +353,6 @@ export default function ERPTorreD10() {
     return { lineas, deudaTotalUSD: deudaAcumulada, totalAbonadoUSD: tUSD, totalAbonadoBs: tBS, propietario: resInfo };
   }, [filtroAptoTab2, pagosResidentes, propietarios]);
 
-  // --- FILTRADO PESTAÑA 3 ---
   const dataResidentesFiltrada = useMemo(() => {
     return pagosResidentes.filter(p => {
       return (
@@ -381,7 +370,6 @@ export default function ERPTorreD10() {
     };
   }, [dataResidentesFiltrada]);
 
-  // --- FILTRADO PESTAÑA 4 ---
   const libroDiarioFiltrado = useMemo(() => {
     return libroDiarioConsolidado.filter(t => 
       (filtroAnioTab4 === '' || t.anio?.toString().trim() === filtroAnioTab4.trim()) &&
@@ -398,13 +386,15 @@ export default function ERPTorreD10() {
     };
   }, [libroDiarioFiltrado]);
 
-  // --- FILTRADO PESTAÑA 5 ---
   const transaccionesMesTab5 = libroDiarioConsolidado.filter(t => 
     (filtroMesTab5 === 'TODOS' || t.mes === filtroMesTab5) && 
     (filtroAnioTab5 === 'TODOS' || t.anio?.toString() === filtroAnioTab5)
   );
-  const mIngUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_usd), 0), mGstUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
-  const mIngBS = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_bs), 0), mGstBS = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
+  
+  const mIngUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
+  const mGstUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
+  const mIngBS = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_bs), 0);
+  const mGstBS = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
 
   const propietariosFiltradosTab6 = propietarios.filter(p => p.piso?.toString() === pisoActivoTab6);
 
@@ -578,7 +568,6 @@ export default function ERPTorreD10() {
                 <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800">Filtros Activos</span>
                 <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 font-sans outline-none"><option value="">Piso (Todos)</option>{listaPisos.map(p => <option key={p} value={p}>Piso {p}</option>)}</select>
                 <select value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-emerald-400 font-bold outline-none"><option value="">Apto (Todos)</option>{listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}</select>
-                {/* SELECT DE FECHAS DE PAGO CORREGIDO POR ORDEN CRONOLÓGICO */}
                 <select value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-amber-400 font-bold outline-none font-mono">
                   <option value="">Fecha de Pago (Todas)</option>
                   {listaFechasPagoPestaña3.map(f => <option key={f} value={f}>{f}</option>)}
@@ -620,7 +609,6 @@ export default function ERPTorreD10() {
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-200">Relacion de Gastos Mensual</h2>
             <form onSubmit={handleRegistrarMovimiento} className="bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800">
-              {/* FORMULARIO CORREGIDO CON CASILLA EXPANDIDA Y SIN FACTURA REF */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <input type="text" placeholder="Año" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required />
                 <select value={formGasto.mes} onChange={e => setFormGasto({...formGasto, mes: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required><option value="">-- Mes Contable --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select>
@@ -663,7 +651,6 @@ export default function ERPTorreD10() {
                       libroDiarioFiltrado.map((t, index) => (
                         <tr key={index} className="hover:bg-slate-800/40">
                           <td className="p-4 font-mono border-r border-slate-800/60"><span className="font-bold text-white">{t.anio}</span> <span className="text-slate-400 text-[10px]">{t.mes}</span></td>
-                          {/* COLUMNA DESCRIPCIÓN CON AUTOAJUSTE DE LÍNEAS MULTIPLES COMPLETO */}
                           <td className="p-4 whitespace-normal break-words max-w-[340px] leading-relaxed">
                             <div className="font-medium text-slate-200">{t.descripcion}</div>
                           </td>
@@ -683,9 +670,9 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 5 - CIERRE MENSUAL CORREGIDO PARA IMPRESIÓN Y FILTRO */}
+        {/* PESTAÑA 5 - CIERRE MENSUAL */}
         {activeTab === 'GASTOS_MENSUAL' && (
-          <div className="space-y-6"> {/* REMOVIDO NO-PRINT DE AQUÍ PARA QUE HAGA LA VISTA PREVIA CORRECTAMENTE */}
+          <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="text-xl font-bold text-slate-200">Cierre Contable Mensual</h2>
               {filtroMesTab5 && filtroAnioTab5 && (
@@ -714,7 +701,12 @@ export default function ERPTorreD10() {
             {(filtroMesTab5 || filtroAnioTab5) && (
               <div className="print-area bg-white text-black p-8 rounded-xl border border-gray-200 shadow-sm">
                 <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-start">
-                  <div><h1 className="text-xl font-bold uppercase tracking-wider">TORRE D-10</h1><p className="text-xs text-gray-600 font-bold uppercase mt-1">Cierre de Flujo de Caja</p></div>
+                  {/* MODIFICACIÓN DE IMPRESIÓN (CIUDAD TIUNA) */}
+                  <div>
+                    <h1 className="text-xl font-bold uppercase tracking-wider">TORRE D-10</h1>
+                    <p className="text-xs text-gray-600 font-bold uppercase mt-1">Cierre mensual</p>
+                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest mt-1">DESARROLLO HABITACIONAL CIUDAD TIUNA "SECTOR SIMÓN BOLÍVAR" DISTRITO CAPITAL SECTOR D TORRE D-10</p>
+                  </div>
                   <div className="text-right"><p className="text-lg font-bold uppercase">{filtroMesTab5} {filtroAnioTab5}</p><p className="text-[10px] text-gray-500 font-mono">Generado: {new Date().toLocaleDateString()}</p></div>
                 </div>
                 <div className="grid grid-cols-2 gap-6 mb-6">
@@ -729,7 +721,6 @@ export default function ERPTorreD10() {
                     {transaccionesMesTab5.map((t, idx) => (
                       <tr key={idx}>
                         <td className="p-2 text-gray-500 font-mono">#{t.id}</td>
-                        {/* PESTAÑA 5: DESCRIPCIÓN CON AUTOAJUSTE ADAPTATIVO A DOS O MÁS LÍNEAS */}
                         <td className="p-2 text-gray-800 font-medium whitespace-normal break-words max-w-[280px] leading-relaxed">{t.descripcion}</td>
                         <td className="p-2 text-right font-mono text-emerald-700">+${formatMoney(t.ingreso_usd)}</td>
                         <td className="p-2 text-right font-mono text-red-700">-${formatMoney(t.gasto_usd)}</td>

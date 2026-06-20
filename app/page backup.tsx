@@ -30,7 +30,7 @@ export default function ERPTorreD10() {
   const [filtroMesTab1, setFiltroMesTab1] = useState<string>('TODOS');
 
   // --- FORMULARIOS ---
-  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
+  const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: 'N/A', descripcion: '', gasto_usd: '', gasto_bs: '' });
   
   const [autoMesPendiente, setAutoMesPendiente] = useState(true);
   const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_seleccionado: '', anio_corresponding: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
@@ -47,7 +47,7 @@ export default function ERPTorreD10() {
   // --- FILTROS TAB 2 Y 5 ---
   const [filtroAptoTab2, setFiltroAptoTab2] = useState('');
   const [filtroMesTab5, setFiltroMesTab5] = useState('TODOS');
-  const [filtroAnioTab5, setFiltroAnioTab5] = useState(new Date().getFullYear().toString());
+  const [filtroAnioTab5, setFiltroAnioTab5] = useState('TODOS'); // Corregido por defecto a "Todos los Años"
 
   // --- FILTROS TAB 6 (GESTIÓN) ---
   const [pisoActivoTab6, setPisoActivoTab6] = useState<string>('');
@@ -62,9 +62,10 @@ export default function ERPTorreD10() {
     return [...new Set(propietarios.map(p => p.piso?.toString()).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
   }, [propietarios]);
 
+  // FILTRO ORDENADO CRONOLÓGICAMENTE (De más antiguo a más reciente)
   const listaFechasPagoPestaña3 = useMemo(() => {
     const fechas = pagosResidentes.map(p => p.fecha_pago_real).filter(Boolean);
-    return [...new Set(fechas)].sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    return [...new Set(fechas)].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
   }, [pagosResidentes]);
 
   const handleLogout = () => { 
@@ -155,40 +156,51 @@ export default function ERPTorreD10() {
     if (data) setPropietarios(data.sort((a, b) => a.apartamento.localeCompare(b.apartamento, undefined, { numeric: true, sensitivity: 'base' })));
   };
 
-  // --- EXTACTOR DE FECHA EXCLUSIVO SIN ERRORES DE ZONA HORARIA O BOMBAS DE ENERO ---
+  // --- MOTOR DE EXTRACCIÓN CRONOLÓGICO SEGURO (Buster antibugs de Enero) ---
   const parseFechaPago = (fechaStr: string) => {
     if (!fechaStr) return { mesNombre: 'Enero', anioStr: '2025', mesIdx: 1 };
     
-    const matchISO = fechaStr.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
-    if (matchISO) {
-      const y = parseInt(matchISO[1], 10);
-      const m = parseInt(matchISO[2], 10);
-      if (y >= 2023 && m >= 1 && m <= 12) {
-        return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
+    const cleanStr = fechaStr.split('T')[0].trim();
+    const parts = cleanStr.split(/[-/]/);
+    
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        // Formato ISO estándar: YYYY-MM-DD
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(y) && !isNaN(m) && m >= 1 && m <= 12) {
+          return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
+        }
+      } else if (parts[2].length === 4) {
+        // Formato Latino/Americano: DD/MM/YYYY o MM/DD/YYYY
+        const y = parseInt(parts[2], 10);
+        const p0 = parseInt(parts[0], 10);
+        const p1 = parseInt(parts[1], 10);
+        
+        // Detección inteligente del patrón de inversión de meses (4, 8, 12 frente a día 1)
+        if (p0 <= 12 && p1 === 1 && (p0 === 4 || p0 === 8 || p0 === 12)) {
+          return { mesNombre: mesesDelAno[p0 - 1], anioStr: y.toString(), mesIdx: p0 };
+        }
+        if (!isNaN(p1) && p1 >= 1 && p1 <= 12) {
+          return { mesNombre: mesesDelAno[p1 - 1], anioStr: y.toString(), mesIdx: p1 };
+        }
+        if (!isNaN(p0) && p0 >= 1 && p0 <= 12) {
+          return { mesNombre: mesesDelAno[p0 - 1], anioStr: y.toString(), mesIdx: p0 };
+        }
       }
     }
     
-    const matchLatin = fechaStr.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
-    if (matchLatin) {
-      const y = parseInt(matchLatin[3], 10);
-      const m = parseInt(matchLatin[2], 10);
-      if (y >= 2023 && m >= 1 && m <= 12) {
-        return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
-      }
+    const dObj = new Date(fechaStr);
+    if (!isNaN(dObj.getTime())) {
+      const y = dObj.getUTCFullYear();
+      const m = dObj.getUTCMonth() + 1;
+      return { mesNombre: mesesDelAno[m - 1] || 'Enero', anioStr: y.toString(), mesIdx: m };
     }
     
-    const d = new Date(fechaStr);
-    if (!isNaN(d.getTime())) {
-      const y = d.getUTCFullYear();
-      const m = d.getUTCMonth() + 1;
-      if (y >= 2023 && m >= 1 && m <= 12) {
-        return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
-      }
-    }
     return { mesNombre: 'Enero', anioStr: '2025', mesIdx: 1 };
   };
 
-  // --- CORE DE CAJA: ESTRUCTURACIÓN CRONOLÓGICA BLINDADA ---
+  // --- CORE DE CAJA CONSOLIDADO OPERATIVO ---
   const libroDiarioConsolidado = useMemo(() => {
     const ingresosAgrupados = new Map<string, { usd: number, bs: number, mesNombre: string, anioStr: string, mesIdx: number }>();
     
@@ -217,7 +229,7 @@ export default function ERPTorreD10() {
       if (Number(t.gasto_usd) > 0 || Number(t.gasto_bs) > 0) {
         const mIdx = mesesDelAno.indexOf(t.mes) !== -1 ? mesesDelAno.indexOf(t.mes) + 1 : 1;
         lineasFinales.push({
-          id: t.id, anio: t.anio, mes: t.mes, descripcion: t.descripcion, referencia: t.referencia,
+          id: t.id, anio: t.anio, mes: t.mes, descripcion: t.descripcion, referencia: t.referencia || 'N/A',
           ingreso_usd: 0, gasto_usd: Number(t.gasto_usd || 0), ingreso_bs: 0, gasto_bs: Number(t.gasto_bs || 0),
           tipo: 'GASTO', fecha_sort: `${t.anio}-${mIdx.toString().padStart(2, '0')}-02T00:00:00.000Z`
         });
@@ -259,7 +271,7 @@ export default function ERPTorreD10() {
     e.preventDefault();
     const payload = { fecha: new Date().toISOString(), anio: formGasto.anio, mes: formGasto.mes, referencia: formGasto.referencia || 'N/A', descripcion: formGasto.descripcion, ingreso_usd: 0, gasto_usd: Number(formGasto.gasto_usd)||0, ingreso_bs: 0, gasto_bs: Number(formGasto.gasto_bs)||0 };
     const { error } = await supabase.from('finanzas_d10').insert([payload]);
-    if (!error) { alert("✅ Gasto registrado."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
+    if (!error) { alert("✅ Gasto registrado."); setFormGasto({ anio: new Date().getFullYear().toString(), mes: '', referencia: 'N/A', descripcion: '', gasto_usd: '', gasto_bs: '' }); fetchTransacciones(); }
   };
 
   const handleRegistrarPagoResidente = async (e: React.FormEvent) => {
@@ -293,7 +305,7 @@ export default function ERPTorreD10() {
 
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
-  // --- FUNCIÓN GLOBAL DE IMPRESIÓN ---
+  // --- FUNCCIÓN GLOBAL DE IMPRESIÓN ---
   const handlePrint = (titulo: string) => { window.print(); };
 
   // --- REDUCER PESTAÑA 1 ---
@@ -566,6 +578,7 @@ export default function ERPTorreD10() {
                 <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800">Filtros Activos</span>
                 <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 font-sans outline-none"><option value="">Piso (Todos)</option>{listaPisos.map(p => <option key={p} value={p}>Piso {p}</option>)}</select>
                 <select value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-emerald-400 font-bold outline-none"><option value="">Apto (Todos)</option>{listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}</select>
+                {/* SELECT DE FECHAS DE PAGO CORREGIDO POR ORDEN CRONOLÓGICO */}
                 <select value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-amber-400 font-bold outline-none font-mono">
                   <option value="">Fecha de Pago (Todas)</option>
                   {listaFechasPagoPestaña3.map(f => <option key={f} value={f}>{f}</option>)}
@@ -607,11 +620,11 @@ export default function ERPTorreD10() {
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-200">Relacion de Gastos Mensual</h2>
             <form onSubmit={handleRegistrarMovimiento} className="bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800">
+              {/* FORMULARIO CORREGIDO CON CASILLA EXPANDIDA Y SIN FACTURA REF */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <input type="text" placeholder="Año" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required />
                 <select value={formGasto.mes} onChange={e => setFormGasto({...formGasto, mes: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required><option value="">-- Mes Contable --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select>
-                <input type="text" placeholder="Factura Ref" value={formGasto.referencia} onChange={e => setFormGasto({...formGasto, referencia: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" />
-                <input type="text" placeholder="Descripción del Egreso" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required />
+                <input type="text" placeholder="Descripción del Egreso" value={formGasto.descripcion} onChange={e => setFormGasto({...formGasto, descripcion: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none md:col-span-2" required />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 bg-red-950/20 p-4 rounded-lg border border-red-900/30">
                 <div><label className="block text-[10px] font-bold text-red-400 mb-1">Salida USD (-)</label><input type="number" step="0.01" value={formGasto.gasto_usd} onChange={e => setFormGasto({...formGasto, gasto_usd: e.target.value})} className="w-full p-3 bg-slate-950 border border-red-900/50 rounded-lg text-sm text-white font-mono focus:border-red-500 outline-none" /></div>
@@ -642,7 +655,7 @@ export default function ERPTorreD10() {
                          </div>
                        </div>
                      </th>
-                     <th className="p-4">Descripción / Unidad Ref</th><th className="p-4 text-right text-emerald-400">Ingreso $</th><th className="p-4 text-right text-red-400">Gasto $</th><th className="p-4 text-right font-bold">Saldo Caja $</th><th className="p-4 text-right text-emerald-400">Ingreso Bs</th><th className="p-4 text-right text-red-400">Gasto Bs</th><th className="p-4 text-right font-bold">Saldo Caja Bs</th><th className="p-4 text-center">Acciones</th>
+                     <th className="p-4">Descripción</th><th className="p-4 text-right text-emerald-400">Ingreso $</th><th className="p-4 text-right text-red-400">Gasto $</th><th className="p-4 text-right font-bold">Saldo Caja $</th><th className="p-4 text-right text-emerald-400">Ingreso Bs</th><th className="p-4 text-right text-red-400">Gasto Bs</th><th className="p-4 text-right font-bold">Saldo Caja Bs</th><th className="p-4 text-center">Acciones</th>
                    </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-800/60">
@@ -650,8 +663,8 @@ export default function ERPTorreD10() {
                       libroDiarioFiltrado.map((t, index) => (
                         <tr key={index} className="hover:bg-slate-800/40">
                           <td className="p-4 font-mono border-r border-slate-800/60"><span className="font-bold text-white">{t.anio}</span> <span className="text-slate-400 text-[10px]">{t.mes}</span></td>
-                          {/* COLUMNA DESCRIPCIÓN CON AUTOAJUSTE DE LÍNEAS MULTIPLES Y REMOCIÓN DE REF */}
-                          <td className="p-4 whitespace-normal break-words max-w-[320px] leading-relaxed">
+                          {/* COLUMNA DESCRIPCIÓN CON AUTOAJUSTE DE LÍNEAS MULTIPLES COMPLETO */}
+                          <td className="p-4 whitespace-normal break-words max-w-[340px] leading-relaxed">
                             <div className="font-medium text-slate-200">{t.descripcion}</div>
                           </td>
                           <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
@@ -670,10 +683,10 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 5 */}
+        {/* PESTAÑA 5 - CIERRE MENSUAL CORREGIDO PARA IMPRESIÓN Y FILTRO */}
         {activeTab === 'GASTOS_MENSUAL' && (
-          <div className="space-y-6 no-print">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div className="space-y-6"> {/* REMOVIDO NO-PRINT DE AQUÍ PARA QUE HAGA LA VISTA PREVIA CORRECTAMENTE */}
+            <div className="no-print flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="text-xl font-bold text-slate-200">Cierre Contable Mensual</h2>
               {filtroMesTab5 && filtroAnioTab5 && (
                 <button onClick={() => handlePrint(`Cierre Mensual - ${filtroMesTab5} ${filtroAnioTab5}`)} className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded text-xs uppercase tracking-widest shadow-md transition-all">
@@ -681,7 +694,7 @@ export default function ERPTorreD10() {
                 </button>
               )}
             </div>
-            <div className="bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800 flex gap-4">
+            <div className="no-print bg-slate-900/80 backdrop-blur-sm p-6 rounded-xl border border-slate-800 flex gap-4">
               <div className="w-1/4">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año</label>
                 <select value={filtroAnioTab5} onChange={e => setFiltroAnioTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 outline-none">
@@ -699,7 +712,7 @@ export default function ERPTorreD10() {
             </div>
             
             {(filtroMesTab5 || filtroAnioTab5) && (
-              <div className="print-area bg-white text-black p-8 rounded-xl border border-gray-200">
+              <div className="print-area bg-white text-black p-8 rounded-xl border border-gray-200 shadow-sm">
                 <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-start">
                   <div><h1 className="text-xl font-bold uppercase tracking-wider">TORRE D-10</h1><p className="text-xs text-gray-600 font-bold uppercase mt-1">Cierre de Flujo de Caja</p></div>
                   <div className="text-right"><p className="text-lg font-bold uppercase">{filtroMesTab5} {filtroAnioTab5}</p><p className="text-[10px] text-gray-500 font-mono">Generado: {new Date().toLocaleDateString()}</p></div>
@@ -708,7 +721,7 @@ export default function ERPTorreD10() {
                   <div className="bg-gray-50 p-4 rounded border border-gray-300"><p className="text-[10px] font-bold text-gray-600 uppercase mb-2">Neto USD</p><div className="flex justify-between text-xs mb-1"><span>Ingresos:</span><span className="text-emerald-700 font-bold">+${formatMoney(mIngUSD)}</span></div><div className="flex justify-between text-xs mb-1"><span>Egresos:</span><span className="text-red-700 font-bold">-${formatMoney(mGstUSD)}</span></div><div className="flex justify-between text-sm border-t border-gray-300 pt-1 font-bold"><span>Total:</span><span className={mIngUSD - mGstUSD >= 0 ? 'text-emerald-700' : 'text-red-700'}>${formatMoney(mIngUSD - mGstUSD)}</span></div></div>
                   <div className="bg-gray-50 p-4 rounded border border-gray-300"><p className="text-[10px] font-bold text-gray-600 uppercase mb-2">Neto Bolívares</p><div className="flex justify-between text-xs mb-1"><span>Ingresos:</span><span className="text-emerald-700 font-bold">+Bs {formatMoney(mIngBS)}</span></div><div className="flex justify-between text-xs mb-1"><span>Egresos:</span><span className="text-red-700 font-bold">-Bs {formatMoney(mGstBS)}</span></div><div className="flex justify-between text-sm border-t border-gray-300 pt-1 font-bold"><span>Total:</span><span className={mIngBS - mGstBS >= 0 ? 'text-emerald-700' : 'text-red-700'}>Bs {formatMoney(mIngBS - mGstBS)}</span></div></div>
                 </div>
-                <table className="w-full text-left text-[11px] whitespace-nowrap">
+                <table className="w-full text-left text-[11px] whitespace-nowrap print-table">
                   <thead className="bg-gray-800 text-white uppercase text-[9px]">
                     <tr><th className="p-2">ID</th><th className="p-2">Descripción</th><th className="p-2 text-right">Ingreso $</th><th className="p-2 text-right">Egreso $</th><th className="p-2 text-right">Saldo $</th><th className="p-2 text-right">Ingreso Bs</th><th className="p-2 text-right">Egreso Bs</th><th className="p-2 text-right">Saldo Bs</th></tr>
                   </thead>
@@ -716,7 +729,7 @@ export default function ERPTorreD10() {
                     {transaccionesMesTab5.map((t, idx) => (
                       <tr key={idx}>
                         <td className="p-2 text-gray-500 font-mono">#{t.id}</td>
-                        {/* PESTAÑA 5: DESCRIPCIÓN CON AUTOAJUSTE DE LÍNEAS MULTIPLES SIN RECORTE */}
+                        {/* PESTAÑA 5: DESCRIPCIÓN CON AUTOAJUSTE ADAPTATIVO A DOS O MÁS LÍNEAS */}
                         <td className="p-2 text-gray-800 font-medium whitespace-normal break-words max-w-[280px] leading-relaxed">{t.descripcion}</td>
                         <td className="p-2 text-right font-mono text-emerald-700">+${formatMoney(t.ingreso_usd)}</td>
                         <td className="p-2 text-right font-mono text-red-700">-${formatMoney(t.gasto_usd)}</td>
@@ -776,7 +789,7 @@ export default function ERPTorreD10() {
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Piso</label><input type="text" value={editingProp.piso || ''} onChange={e => setEditingProp({...editingProp, piso: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-sm text-white capitalize"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white capitalize"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Año de Ingreso</label><select value={editingProp.inicio_ano || ''} onChange={e => setEditingProp({...editingProp, inicio_ano: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white"><option value="">-- Año --</option>{listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
               </div>
               <div className="flex gap-3 pt-2">

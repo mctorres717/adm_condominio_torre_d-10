@@ -25,8 +25,9 @@ export default function ERPTorreD10() {
   const [pagosResidentes, setPagosResidentes] = useState<any[]>([]);
   const [propietarios, setPropietarios] = useState<any[]>([]);
 
-  // --- FILTRO POR AÑO PESTAÑA 1 ---
+  // --- FILTROS PESTAÑA 1 ---
   const [filtroAnioTab1, setFiltroAnioTab1] = useState<string>('TODOS');
+  const [filtroMesTab1, setFiltroMesTab1] = useState<string>('TODOS');
 
   // --- FORMULARIOS ---
   const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
@@ -40,6 +41,10 @@ export default function ERPTorreD10() {
   const [filtroPiso, setFiltroPiso] = useState('');
   const [filtroApto, setFiltroApto] = useState('');
   const [filtroFechaPagoReal, setFiltroFechaPagoReal] = useState('');
+
+  // --- FILTROS TAB 4 (LIBRO DIARIO) ---
+  const [filtroAnioTab4, setFiltroAnioTab4] = useState('');
+  const [filtroMesTab4, setFiltroMesTab4] = useState('');
 
   // --- FILTROS TAB 2 Y 5 ---
   const [filtroAptoTab2, setFiltroAptoTab2] = useState('');
@@ -101,7 +106,6 @@ export default function ERPTorreD10() {
     const resInfo = propietarios.find(p => p.apartamento === formPagoResidente.apartamento);
     const pagosDelApto = pagosResidentes.filter(p => p.apartamento === formPagoResidente.apartamento);
     
-    // Solo consideramos pagados los meses que tengan un abono real
     const mapaPagos = new Set(
       pagosDelApto
         .filter(p => Number(p.monto_pagado_usd) > 0 || Number(p.monto_pagado_bs) > 0)
@@ -163,12 +167,11 @@ export default function ERPTorreD10() {
     if (data) setPropietarios(data.sort((a, b) => a.apartamento.localeCompare(b.apartamento, undefined, { numeric: true, sensitivity: 'base' })));
   };
 
-  // --- LIBRO DIARIO CONSOLIDADO CON PARSER DE FECHAS ROBUSTO ---
+  // --- LIBRO DIARIO CONSOLIDADO: DETECTOR ANALÍTICO DE FECHAS MULTI-FORMATO ---
   const libroDiarioConsolidado = useMemo(() => {
     const ingresosAgrupados = new Map<string, { usd: number, bs: number }>();
     
     pagosResidentes.forEach(p => {
-      // Filtrar filas de Excel sin abonos
       const mUSD = Number(p.monto_pagado_usd || 0);
       const mBS = Number(p.monto_pagado_bs || 0);
       if (mUSD === 0 && mBS === 0) return; 
@@ -176,27 +179,45 @@ export default function ERPTorreD10() {
       let anioPagoReal = p.anio_correspondiente?.toString() || '2025';
       let mesPagoReal = p.mes_correspondiente || 'Enero';
       
-      // Parser robusto para fechas físicas (YYYY-MM-DD, DD/MM/YYYY, etc.)
       const fechaStr = p.fecha_pago_real ? p.fecha_pago_real.toString().trim() : '';
-      let mesIndice = -1;
 
       if (fechaStr) {
-        if (fechaStr.includes('-')) {
-          const pt = fechaStr.split('-');
-          if (pt[0].length === 4) { anioPagoReal = pt[0]; mesIndice = parseInt(pt[1], 10) - 1; } 
-          else if (pt[2].length === 4) { anioPagoReal = pt[2]; mesIndice = parseInt(pt[1], 10) - 1; }
-        } else if (fechaStr.includes('/')) {
-          const pt = fechaStr.split('/');
-          if (pt[2].length === 4) { anioPagoReal = pt[2]; mesIndice = parseInt(pt[1], 10) - 1; }
-          else if (pt[0].length === 4) { anioPagoReal = pt[0]; mesIndice = parseInt(pt[1], 10) - 1; }
-        } else {
-          const d = new Date(fechaStr);
-          if (!isNaN(d.getTime())) { anioPagoReal = d.getFullYear().toString(); mesIndice = d.getMonth(); }
+        const delimiters = /[-/]/;
+        const parts = fechaStr.split(delimiters).map((x: string) => x.trim());
+        
+        if (parts.length === 3) {
+          let month = 0, year = 0;
+          
+          if (parts[0].length === 4) { // Formato Estándar YYYY-MM-DD
+            year = parseInt(parts[0], 10);
+            const p1 = parseInt(parts[1], 10);
+            const p2 = parseInt(parts[2], 10);
+            month = p1 > 12 ? p2 : p1;
+          } else if (parts[2].length === 4) { // Formato de Exportación Excel (DD/MM/YYYY o MM/DD/YYYY)
+            year = parseInt(parts[2], 10);
+            const p0 = parseInt(parts[0], 10);
+            const p1 = parseInt(parts[1], 10);
+            
+            if (p0 > 12) { month = p1; } 
+            else if (p1 > 12) { month = p0; } 
+            else {
+              // Caso ambiguo (ej: 05/12/2023). Desempatamos cruzando con el mes contable de su cuota
+              const targetMesIdx = mesesDelAno.findIndex(m => m.toLowerCase() === (p.mes_correspondiente || '').toLowerCase().trim());
+              if (targetMesIdx !== -1) {
+                if (p1 === targetMesIdx + 1) month = p1;
+                else if (p0 === targetMesIdx + 1) month = p0;
+                else month = p1;
+              } else {
+                month = p1; 
+              }
+            }
+          }
+          
+          if (year >= 2023 && month >= 1 && month <= 12) {
+            anioPagoReal = year.toString();
+            mesPagoReal = mesesDelAno[month - 1];
+          }
         }
-      }
-
-      if (mesIndice >= 0 && mesIndice <= 11) {
-         mesPagoReal = mesesDelAno[mesIndice];
       }
 
       const clave = `${mesPagoReal.toLowerCase().trim()}-${anioPagoReal.trim()}`;
@@ -246,8 +267,8 @@ export default function ERPTorreD10() {
   }, [transacciones, pagosResidentes]);
 
   const handleEliminarTransaccion = async (id: any) => {
-    if (id.toString().includes('REC-')) return alert("ℹ️ Los flujos de ingreso se eliminan borrando el recibo origen desde la Pestaña 3.");
-    if (!window.confirm("⚠️ ¿Desea eliminar este egreso?")) return;
+    if (id.toString().includes('REC-')) return alert("ℹ️ Los flujos de ingreso centralizados se deben eliminar directamente borrando el recibo origen desde la Pestaña 3.");
+    if (!window.confirm("⚠️ ¿Desea eliminar este egreso del libro diario operativo?")) return;
     const { error } = await supabase.from('finanzas_d10').delete().eq('id', id);
     if (error) alert(error.message); else { alert("✅ Registro eliminado."); fetchTransacciones(); }
   };
@@ -298,19 +319,22 @@ export default function ERPTorreD10() {
     else alert('Clave de acceso denegada.');
   };
 
-  const handlePrint = (t: string) => { const o = document.title; document.title = t; window.print(); setTimeout(() => { document.title = o; }, 1000); };
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
+  // --- REDUCER DINÁMICO DE LA PESTAÑA 1 (FILTRO COMBINADO MES/AÑO CONTABLE) ---
   const finanzasTab1Calculadas = useMemo(() => {
-    const tFiltradas = libroDiarioConsolidado.filter(t => filtroAnioTab1 === 'TODOS' || t.anio?.toString() === filtroAnioTab1);
+    const tFiltradas = libroDiarioConsolidado.filter(t => 
+      (filtroAnioTab1 === 'TODOS' || t.anio?.toString().trim() === filtroAnioTab1.trim()) &&
+      (filtroMesTab1 === 'TODOS' || t.mes?.toString().toLowerCase().trim() === filtroMesTab1.toLowerCase().trim())
+    );
     const iUSD = tFiltradas.reduce((acc, t) => acc + Number(t.ingreso_usd || 0), 0);
     const gUSD = tFiltradas.reduce((acc, t) => acc + Number(t.gasto_usd || 0), 0);
     const iBS = tFiltradas.reduce((acc, t) => acc + Number(t.ingreso_bs || 0), 0);
     const gBS = tFiltradas.reduce((acc, t) => acc + Number(t.gasto_bs || 0), 0);
     return { ingresoUSD: iUSD, gastoUSD: gUSD, saldoUSD: iUSD - gUSD, ingresoBs: iBS, gastoBs: gBS, saldoBs: iBS - gBS };
-  }, [libroDiarioConsolidado, filtroAnioTab1]);
+  }, [libroDiarioConsolidado, filtroAnioTab1, filtroMesTab1]);
 
-  // --- MOTOR CONTABLE PESTAÑA 2: IGNORAR FILAS VACÍAS IMPORTADAS ---
+  // --- MOTOR CONTABLE PESTAÑA 2 ---
   const estadoDeCuentaGenerado = useMemo(() => {
     if (!filtroAptoTab2) return { lineas: [], deudaTotalUSD: 0, totalAbonadoUSD: 0, totalAbonadoBs: 0, propietario: null };
     
@@ -325,7 +349,6 @@ export default function ERPTorreD10() {
       const mBS = Number(p.monto_pagado_bs || 0);
       tUSD += mUSD; tBS += mBS;
       
-      // Solo consideramos pago si hay un monto real
       if (mUSD > 0 || mBS > 0) {
         const clave = `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`;
         mapaPagos.set(clave, p);
@@ -357,19 +380,13 @@ export default function ERPTorreD10() {
         }
         
         lineas.push({
-          periodo: `${nomMes} ${anioIterador}`,
-          estatus: 'PAGADO',
-          cargos: 0,
-          desc_ref: pagoReal.descripcion || `Pago cuota realizado el ${fPago}`,
-          fecha_ejecucion: fPago || 'Fecha no registrada'
+          periodo: `${nomMes} ${anioIterador}`, estatus: 'PAGADO', cargos: 0,
+          desc_ref: pagoReal.descripcion || `Pago cuota realizado el ${fPago}`, fecha_ejecucion: fPago || 'Fecha no registrada'
         });
       } else {
         lineas.push({
-          periodo: `${nomMes} ${anioIterador}`,
-          estatus: 'PENDIENTE',
-          cargos: CUOTA_MENSUAL_USD,
-          desc_ref: 'Cuota Condominio Pendiente de Pago',
-          fecha_ejecucion: 'Pendiente por pagar'
+          periodo: `${nomMes} ${anioIterador}`, estatus: 'PENDIENTE', cargos: CUOTA_MENSUAL_USD,
+          desc_ref: 'Cuota Condominio Pendiente de Pago', fecha_ejecucion: 'Pendiente por pagar'
         });
         deudaAcumulada += CUOTA_MENSUAL_USD;
       }
@@ -379,7 +396,7 @@ export default function ERPTorreD10() {
     return { lineas, deudaTotalUSD: deudaAcumulada, totalAbonadoUSD: tUSD, totalAbonadoBs: tBS, propietario: resInfo };
   }, [filtroAptoTab2, pagosResidentes, propietarios]);
 
-  // --- FILTRADO AVANZADO (PESTAÑA 3) ---
+  // --- FILTRADO EN TIEMPO REAL DE LA RECAUDACIÓN (PESTAÑA 3) ---
   const dataResidentesFiltrada = useMemo(() => {
     return pagosResidentes.filter(p => {
       let fPagoFormateada = p.fecha_pago_real || '';
@@ -397,6 +414,21 @@ export default function ERPTorreD10() {
       );
     });
   }, [pagosResidentes, filtroAnio, filtroMes, filtroPiso, filtroApto, filtroFechaPagoReal]);
+
+  // --- SUMATORIA EN VIVO PARA LA BÚSQUEDA FILTRADA DE LA PESTAÑA 3 ---
+  const sumasTablaRecaudacion = useMemo(() => {
+    const usd = dataResidentesFiltrada.reduce((acc, item) => acc + Number(item.monto_pagado_usd || 0), 0);
+    const bs = dataResidentesFiltrada.reduce((acc, item) => acc + Number(item.monto_pagado_bs || 0), 0);
+    return { usd, bs };
+  }, [dataResidentesFiltrada]);
+
+  // --- FILTRADO ESTILO EXCEL PARA EL LIBRO DIARIO (PESTAÑA 4) ---
+  const libroDiarioFiltrado = useMemo(() => {
+    return libroDiarioConsolidado.filter(t => 
+      (filtroAnioTab4 === '' || t.anio?.toString().trim() === filtroAnioTab4.trim()) &&
+      (filtroMesTab4 === '' || t.mes?.toString().toLowerCase().trim() === filtroMesTab4.toLowerCase().trim())
+    );
+  }, [libroDiarioConsolidado, filtroAnioTab4, filtroMesTab4]);
 
   const transaccionesMesTab5 = libroDiarioConsolidado.filter(t => t.mes === filtroMesTab5 && t.anio?.toString() === filtroAnioTab5);
   const mIngUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.ingreso_usd), 0), mGstUSD = transaccionesMesTab5.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
@@ -419,19 +451,7 @@ export default function ERPTorreD10() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-12">
       
-      <style>{`
-        @media print {
-          @page { size: letter portrait; margin: 1.2cm; }
-          body { background-color: white !important; color: black !important; }
-          .no-print { display: none !important; }
-          .print-area { display: block !important; width: 100% !important; background: white !important; color: black !important; }
-          .page-header-print { display: flex !important; flex-direction: column !important; margin-bottom: 15px; border-b: 2px solid black; padding-bottom: 8px; }
-          .print-table th { background-color: #f3f4f6 !important; color: black !important; border: 1px solid #d1d5db !important; }
-          .print-table td { border: 1px solid #e5e7eb !important; color: black !important; }
-        }
-        .page-header-print { display: none; }
-      `}</style>
-      
+      {/* HEADER PRINCIPAL */}
       <header className="no-print bg-emerald-900 border-b border-emerald-800 py-4 px-6 sticky top-0 z-40 shadow-xl bg-opacity-95 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto flex flex-col gap-4">
           <div className="flex items-center justify-between w-full">
@@ -456,17 +476,26 @@ export default function ERPTorreD10() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8">
         
-        {/* PESTAÑA 1 */}
+        {/* PESTAÑA 1: RESUMEN FINANCIERO CON FILTROS COMBINADOS MES Y AÑO */}
         {activeTab === 'RESUMEN' && (
           <div className="space-y-6 no-print">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="text-xl font-bold text-slate-300">Resumen Financiero Operativo</h2>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-400 uppercase font-bold">Filtro de Ejercicio:</label>
-                <select value={filtroAnioTab1} onChange={e => setFiltroAnioTab1(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400 focus:outline-none">
-                  <option value="TODOS">Ver Todo el Histórico</option>
-                  {listaAniosFiltro.map(a => <option key={a} value={a}>Año {a}</option>)}
-                </select>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-slate-400 uppercase font-bold">Año Ejercicio:</label>
+                  <select value={filtroAnioTab1} onChange={e => setFiltroAnioTab1(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400 focus:outline-none">
+                    <option value="TODOS">Todos los Años</option>
+                    {listaAniosFiltro.map(a => <option key={a} value={a}>Año {a}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-slate-400 uppercase font-bold">Mes:</label>
+                  <select value={filtroMesTab1} onChange={e => setFiltroMesTab1(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded text-xs text-emerald-400 font-bold focus:outline-none">
+                    <option value="TODOS">Todos los Meses</option>
+                    {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
             
@@ -483,12 +512,11 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 2 */}
+        {/* PESTAÑA 2: ESTADO DE CUENTA */}
         {activeTab === 'BUSQUEDA' && (
           <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-800 pb-2">
               <h2 className="text-xl font-bold text-slate-300">Estado de Cuenta Propietarios Torre D - 10</h2>
-              {filtroAptoTab2 && <button onClick={() => handlePrint(`Estado Cuenta Apto ${filtroAptoTab2}`)} className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-2 px-5 rounded text-xs uppercase tracking-widest transition-all shadow-md">🖨️ Imprimir Estado</button>}
             </div>
             
             <div className="no-print bg-slate-900 p-6 rounded-xl border border-slate-800">
@@ -500,9 +528,8 @@ export default function ERPTorreD10() {
             </div>
             
             {filtroAptoTab2 && (
-              <div className="print-area bg-white text-black p-6 rounded-xl border border-gray-200 shadow-sm">
-                
-                <div className="page-header-print flex justify-between items-center border-b-2 border-black pb-2 mb-4">
+              <div className="bg-white text-black p-6 rounded-xl border border-gray-200 shadow-sm">
+                <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-4">
                   <div>
                     <h1 className="text-xl font-bold tracking-wider">TORRE D-10</h1>
                     <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Estado de Cuenta Oficial de Procondominio</p>
@@ -538,7 +565,7 @@ export default function ERPTorreD10() {
                   </div>
                 </div>
                 
-                <table className="w-full text-left text-xs whitespace-nowrap print-table">
+                <table className="w-full text-left text-xs whitespace-nowrap">
                   <thead className="bg-gray-800 text-white font-mono uppercase text-[9px]">
                     <tr>
                       <th className="p-2.5">Mes Condominio</th>
@@ -565,7 +592,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 3 */}
+        {/* PESTAÑA 3: RECAUDACIÓN CON COLUMNAS OPTIMIZADAS Y BARRA DE SUMA EN VIVO */}
         {activeTab === 'BASE_DATOS' && (
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Mayor de Cobros Manuales</h2>
@@ -615,73 +642,69 @@ export default function ERPTorreD10() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
                 <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado BS</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Descripción / Nomenclatura Manual del Pago</label><input type="text" placeholder="Ej: PAGO MESES DE ENERO HASTA MARZO - REF 1234 - TASA BCV 36.5" value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" /></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Descripción / Nomenclatura Manual del Pago</label><input type="text" placeholder="Ej: PAGO MES DE OCTUBRE 2023 - EFECTIVO RECAUDADO" value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" /></div>
               </div>
               <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Registrar Cobro</button></div>
             </form>
 
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
+            {/* BARRA EXCEL: FILTROS CENTRALIZADOS Y TOTALIZADOR DE BÚSQUEDA EN CALIENTE */}
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-wrap gap-4 items-center justify-between shadow-lg">
+              <div className="flex flex-wrap gap-2.5 items-center">
+                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-950 px-2.5 py-1.5 rounded border border-slate-800">Filtros Avanzados Excel</span>
+                <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 font-sans outline-none">
+                  <option value="">Piso (Todos)</option>
+                  {listaPisos.map(p => <option key={p} value={p}>Piso {p}</option>)}
+                </select>
+                <select value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-emerald-400 font-bold outline-none">
+                  <option value="">Apto (Todos)</option>
+                  {listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 outline-none">
+                  <option value="">Mes Condominio (Todos)</option>
+                  {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-300 outline-none">
+                  <option value="">Año (Todos)</option>
+                  {listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}
+                </select>
+                <input type="text" placeholder="🔍 Buscar por Fecha Pago..." value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="p-2 bg-slate-950 border border-slate-800 rounded text-xs text-white outline-none w-44 font-mono" />
+              </div>
+              
+              {/* SUMA DINÁMICA DE LA BÚSQUEDA */}
+              <div className="bg-slate-950 px-4 py-2 rounded-lg border border-emerald-900/50 flex gap-4 text-xs font-mono shadow-inner">
+                <div>
+                  <span className="text-slate-500 uppercase text-[9px] font-bold block tracking-wider">Total Filtro USD</span>
+                  <span className="text-emerald-400 font-bold text-sm">${formatMoney(sumasTablaRecaudacion.usd)}</span>
+                </div>
+                <div className="border-l border-slate-800 pl-4">
+                  <span className="text-slate-500 uppercase text-[9px] font-bold block tracking-wider">Total Filtro Bs</span>
+                  <span className="text-emerald-400 font-bold text-sm">Bs {formatMoney(sumasTablaRecaudacion.bs)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* TABLA LIMPIA Y REAJUSTADA PARA PANTALLA UNIFICADA */}
+            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
               <table className="w-full text-left text-xs table-fixed">
                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px] border-b border-slate-800">
                   <tr>
-                    <th className="p-3 w-20">
-                      <div className="space-y-1">
-                        <span>Piso</span>
-                        <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans normal-case outline-none">
-                          <option value="">Todos</option>
-                          {listaPisos.map(p => <option key={p} value={p}>Piso {p}</option>)}
-                        </select>
-                      </div>
-                    </th>
-                    <th className="p-3 w-32">
-                      <div className="space-y-1">
-                        <span>Apartamento</span>
-                        <select value={filtroApto} onChange={e => setFiltroApto(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-emerald-400 font-sans normal-case outline-none font-bold">
-                          <option value="">Todos</option>
-                          {listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}
-                        </select>
-                      </div>
-                    </th>
-                    <th className="p-3 w-40">
-                      <div className="space-y-1">
-                        <span>Mes Condominio</span>
-                        <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans normal-case outline-none">
-                          <option value="">Todos los Meses</option>
-                          {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
-                      </div>
-                    </th>
-                    <th className="p-3 w-20">
-                      <div className="space-y-1">
-                        <span>Año</span>
-                        <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans normal-case outline-none">
-                          <option value="">Todos</option>
-                          {listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}
-                        </select>
-                      </div>
-                    </th>
-                    <th className="p-3 w-36">
-                      <div className="space-y-1">
-                        <span>Fecha de Pago</span>
-                        <input type="text" placeholder="Buscar..." value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans outline-none font-normal" />
-                      </div>
-                    </th>
-                    <th className="p-3 w-64">Descripción / Nomenclatura Completa</th>
-                    <th className="p-3 text-right w-24">Abono USD</th>
-                    <th className="p-3 text-right w-28">Abono Bs</th>
-                    <th className="p-3 text-center w-24">Acción</th>
+                    <th className="p-4 w-16">Piso</th>
+                    <th className="p-4 w-24">Apto</th>
+                    <th className="p-4 w-32">Fecha de Pago</th>
+                    <th className="p-4 w-auto">Descripción / Nomenclatura Completa</th>
+                    <th className="p-4 text-right w-24">Abono USD</th>
+                    <th className="p-4 text-right w-28">Abono Bs</th>
+                    <th className="p-4 text-center w-20">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {dataResidentesFiltrada.length === 0 ? (
-                    <tr><td colSpan={9} className="p-6 text-center text-slate-500 font-mono">No existen abonos registrados que coincidan con la búsqueda.</td></tr>
+                    <tr><td colSpan={7} className="p-6 text-center text-slate-500 font-mono">No existen abonos registrados que coincidan con la búsqueda.</td></tr>
                   ) : (
                     dataResidentesFiltrada.map(item => (
                       <tr key={item.id} className="hover:bg-slate-800/40 align-top">
-                        <td className="p-4 font-mono text-slate-400">Piso {item.piso}</td>
+                        <td className="p-4 font-mono text-slate-400">{item.piso}</td>
                         <td className="p-4 font-bold text-emerald-400">{item.apartamento}</td>
-                        <td className="p-4 font-medium text-slate-200">{item.mes_correspondiente}</td>
-                        <td className="p-4 font-mono text-slate-400">{item.anio_correspondiente}</td>
                         <td className="p-4 font-mono text-slate-300">{item.fecha_pago_real}</td>
                         <td className="p-4 text-slate-300 text-[11px] font-mono whitespace-normal break-words leading-relaxed">
                           {item.descripcion}
@@ -700,7 +723,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 4 */}
+        {/* PESTAÑA 4: LIBRO DIARIO CON FILTROS INTEGRADAS EN EL TÍTULO */}
         {activeTab === 'GASTOS_GRAL' && (
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Diario de Caja Operativo</h2>
@@ -718,38 +741,69 @@ export default function ERPTorreD10() {
               <div className="flex justify-end"><button type="submit" className="bg-red-800 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Cargar Egreso</button></div>
             </form>
 
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
+            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto shadow-2xl">
                <table className="w-full text-left text-xs whitespace-nowrap">
-                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]"><tr><th className="p-4">Periodo Contable</th><th className="p-4">Descripción / Unidad Ref</th><th className="p-4 text-right text-emerald-400">Ingreso $</th><th className="p-4 text-right text-red-400">Gasto $</th><th className="p-4 text-right">Saldo Caja $</th><th className="p-4 text-right text-emerald-400">Ingreso Bs</th><th className="p-4 text-right text-red-400">Gasto Bs</th><th className="p-4 text-right">Saldo Caja Bs</th><th className="p-4 text-center">Acciones</th></tr></thead>
+                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]">
+                   <tr>
+                     {/* ENCABEZADO CON FILTROS INTEGRADOS SOLICITADOS */}
+                     <th className="p-4 w-48 bg-slate-900/60 border-r border-slate-800">
+                       <div className="space-y-1">
+                         <span className="block text-slate-400">Periodo Contable</span>
+                         <div className="flex gap-1">
+                           <select value={filtroAnioTab4} onChange={e => setFiltroAnioTab4(e.target.value)} className="p-1 bg-slate-950 border border-slate-700 rounded text-[9px] text-white outline-none font-sans normal-case">
+                             <option value="">Año (Todos)</option>
+                             {listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}
+                           </select>
+                           <select value={filtroMesTab4} onChange={e => setFiltroMesTab4(e.target.value)} className="p-1 bg-slate-950 border border-slate-700 rounded text-[9px] text-white outline-none font-sans normal-case">
+                             <option value="">Mes (Todos)</option>
+                             {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
+                           </select>
+                         </div>
+                       </div>
+                     </th>
+                     <th className="p-4">Descripción / Unidad Ref</th>
+                     <th className="p-4 text-right text-emerald-400">Ingreso $</th>
+                     <th className="p-4 text-right text-red-400">Gasto $</th>
+                     <th className="p-4 text-right font-bold">Saldo Caja $</th>
+                     <th className="p-4 text-right text-emerald-400">Ingreso Bs</th>
+                     <th className="p-4 text-right text-red-400">Gasto Bs</th>
+                     <th className="p-4 text-right font-bold">Saldo Caja Bs</th>
+                     <th className="p-4 text-center">Acciones</th>
+                   </tr>
+                 </thead>
                  <tbody className="divide-y divide-slate-800">
-                    {libroDiarioConsolidado.map((t, index) => (
-                      <tr key={index} className="hover:bg-slate-800/40">
-                        <td className="p-4 font-mono"><span className="font-bold">{t.anio}</span> <span className="text-slate-400 text-[10px]">{t.mes}</span></td>
-                        <td className="p-4"><div className="font-medium text-slate-200">{t.descripcion}</div><div className="text-[10px] text-slate-500 font-mono">Ref: {t.referencia}</div></td>
-                        <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
-                        <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td>
-                        <td className="p-4 text-right font-mono font-bold bg-slate-950/40">{formatMoney(t.saldo_usd)}</td>
-                        <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
-                        <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
-                        <td className="p-4 text-right font-mono font-bold bg-slate-950/40">{formatMoney(t.saldo_bs)}</td>
-                        <td className="p-4 text-center">
-                          <button onClick={() => handleEliminarTransaccion(t.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button>
-                        </td>
-                      </tr>
-                    ))}
+                    {libroDiarioFiltrado.length === 0 ? (
+                      <tr><td colSpan={9} className="p-6 text-center text-slate-500 font-mono">No existen movimientos que coincidan con el periodo filtrado.</td></tr>
+                    ) : (
+                      libroDiarioFiltrado.map((t, index) => (
+                        <tr key={index} className="hover:bg-slate-800/40">
+                          <td className="p-4 font-mono border-r border-slate-800/60"><span className="font-bold text-white">{t.anio}</span> <span className="text-slate-400 text-[10px]">{t.mes}</span></td>
+                          <td className="p-4"><div className="font-medium text-slate-200">{t.descripcion}</div><div className="text-[10px] text-slate-500 font-mono">Ref: {t.referencia}</div></td>
+                          <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono font-bold bg-slate-950/40 text-slate-100">{formatMoney(t.saldo_usd)}</td>
+                          <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
+                          <td className="p-4 text-right font-mono font-bold bg-slate-950/40 text-slate-100">{formatMoney(t.saldo_bs)}</td>
+                          <td className="p-4 text-center">
+                            <button onClick={() => handleEliminarTransaccion(t.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                  </tbody>
                </table>
             </div>
           </div>
         )}
 
-        {/* PESTAÑA 5 */}
+        {/* PESTAÑA 5: CIERRE MENSUAL */}
         {activeTab === 'GASTOS_MENSUAL' && (
           <div className="space-y-6 no-print">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2"><h2 className="text-xl font-bold text-slate-300">Cierre Contable Mensual</h2>{filtroMesTab5 && <button onClick={() => handlePrint(`Cierre Mensual - ${filtroMesTab5} ${filtroAnioTab5}`)} className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded text-xs uppercase tracking-widest shadow-md transition-all">🖨️ Imprimir Cierre</button>}</div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2"><h2 className="text-xl font-bold text-slate-300">Cierre Contable Mensual</h2></div>
             <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 flex gap-4"><div className="w-1/4"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año</label><input type="text" value={filtroAnioTab5} onChange={e => setFiltroAnioTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 outline-none" /></div><div className="w-1/3"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Seleccione Mes</label><select value={filtroMesTab5} onChange={e => setFiltroMesTab5(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-bold text-white focus:border-emerald-500 outline-none"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select></div></div>
             {filtroMesTab5 && (
-              <div className="print-area bg-white text-black p-8 rounded-xl border border-gray-200">
+              <div className="bg-white text-black p-8 rounded-xl border border-gray-200">
                 <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-start">
                   <div><h1 className="text-xl font-bold uppercase tracking-wider">TORRE D-10</h1><p className="text-xs text-gray-600 font-bold uppercase mt-1">Cierre de Flujo de Caja</p></div>
                   <div className="text-right"><p className="text-lg font-bold uppercase">{filtroMesTab5} {filtroAnioTab5}</p><p className="text-[10px] text-gray-500 font-mono">Generado: {new Date().toLocaleDateString()}</p></div>
@@ -764,7 +818,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 6 */}
+        {/* PESTAÑA 6: GESTIÓN DE DATOS */}
         {activeTab === 'GESTION_DATOS' && (
           <div className="no-print flex flex-col gap-6 animate-fadeIn">
             <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">

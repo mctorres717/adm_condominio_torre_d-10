@@ -155,42 +155,57 @@ export default function ERPTorreD10() {
     if (data) setPropietarios(data.sort((a, b) => a.apartamento.localeCompare(b.apartamento, undefined, { numeric: true, sensitivity: 'base' })));
   };
 
-  // --- CORE DE CAJA: PARSER ESTRICTO DE FECHA ---
+  // --- EXTACTOR DE FECHA EXCLUSIVO SIN ERRORES DE ZONA HORARIA O BOMBAS DE ENERO ---
+  const parseFechaPago = (fechaStr: string) => {
+    if (!fechaStr) return { mesNombre: 'Enero', anioStr: '2025', mesIdx: 1 };
+    
+    const matchISO = fechaStr.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+    if (matchISO) {
+      const y = parseInt(matchISO[1], 10);
+      const m = parseInt(matchISO[2], 10);
+      if (y >= 2023 && m >= 1 && m <= 12) {
+        return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
+      }
+    }
+    
+    const matchLatin = fechaStr.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
+    if (matchLatin) {
+      const y = parseInt(matchLatin[3], 10);
+      const m = parseInt(matchLatin[2], 10);
+      if (y >= 2023 && m >= 1 && m <= 12) {
+        return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
+      }
+    }
+    
+    const d = new Date(fechaStr);
+    if (!isNaN(d.getTime())) {
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth() + 1;
+      if (y >= 2023 && m >= 1 && m <= 12) {
+        return { mesNombre: mesesDelAno[m - 1], anioStr: y.toString(), mesIdx: m };
+      }
+    }
+    return { mesNombre: 'Enero', anioStr: '2025', mesIdx: 1 };
+  };
+
+  // --- CORE DE CAJA: ESTRUCTURACIÓN CRONOLÓGICA BLINDADA ---
   const libroDiarioConsolidado = useMemo(() => {
-    const ingresosAgrupados = new Map<string, { usd: number, bs: number }>();
+    const ingresosAgrupados = new Map<string, { usd: number, bs: number, mesNombre: string, anioStr: string, mesIdx: number }>();
     
     pagosResidentes.forEach(p => {
       const mUSD = Number(p.monto_pagado_usd || 0);
       const mBS = Number(p.monto_pagado_bs || 0);
       if (mUSD === 0 && mBS === 0) return; 
 
-      let anioPagoReal = '2025';
-      let mesPagoReal = 'Enero';
       const fechaStr = p.fecha_pago_real ? p.fecha_pago_real.toString().trim() : '';
+      const infoFecha = parseFechaPago(fechaStr);
+      const clave = `${infoFecha.anioStr}-${infoFecha.mesIdx.toString().padStart(2, '0')}`;
 
-      if (fechaStr) {
-        let y = 0, m = 0;
-        if (fechaStr.includes('-')) {
-          const pt = fechaStr.split('-');
-          if (pt[0].length === 4) { y = parseInt(pt[0], 10); m = parseInt(pt[1], 10); } 
-          else if (pt[2].length === 4) { y = parseInt(pt[2], 10); m = parseInt(pt[1], 10); } 
-        } else if (fechaStr.includes('/')) {
-          const pt = fechaStr.split('/');
-          if (pt[2].length === 4) { y = parseInt(pt[2], 10); m = parseInt(pt[1], 10); } 
-          else if (pt[0].length === 4) { y = parseInt(pt[0], 10); m = parseInt(pt[1], 10); } 
-        } else {
-          const d = new Date(fechaStr);
-          if (!isNaN(d.getTime())) { y = d.getFullYear(); m = d.getMonth() + 1; }
-        }
-        
-        if (y >= 2023 && m >= 1 && m <= 12) {
-          anioPagoReal = y.toString();
-          mesPagoReal = mesesDelAno[m - 1];
-        }
+      if (!ingresosAgrupados.has(clave)) {
+        ingresosAgrupados.set(clave, {
+          usd: 0, bs: 0, mesNombre: infoFecha.mesNombre, anioStr: infoFecha.anioStr, mesIdx: infoFecha.mesIdx
+        });
       }
-
-      const clave = `${mesPagoReal.toLowerCase()}-${anioPagoReal}`;
-      if (!ingresosAgrupados.has(clave)) ingresosAgrupados.set(clave, { usd: 0, bs: 0 });
       const item = ingresosAgrupados.get(clave)!;
       item.usd += mUSD; item.bs += mBS;
     });
@@ -200,24 +215,21 @@ export default function ERPTorreD10() {
     
     transacciones.forEach(t => {
       if (Number(t.gasto_usd) > 0 || Number(t.gasto_bs) > 0) {
+        const mIdx = mesesDelAno.indexOf(t.mes) !== -1 ? mesesDelAno.indexOf(t.mes) + 1 : 1;
         lineasFinales.push({
           id: t.id, anio: t.anio, mes: t.mes, descripcion: t.descripcion, referencia: t.referencia,
           ingreso_usd: 0, gasto_usd: Number(t.gasto_usd || 0), ingreso_bs: 0, gasto_bs: Number(t.gasto_bs || 0),
-          tipo: 'GASTO', fecha_sort: t.fecha || new Date().toISOString()
+          tipo: 'GASTO', fecha_sort: `${t.anio}-${mIdx.toString().padStart(2, '0')}-02T00:00:00.000Z`
         });
       }
     });
 
     ingresosAgrupados.forEach((valores, clave) => {
-      const [mes, anio] = clave.split('-');
-      const mesNombreOriginal = mesesDelAno.find(m => m.toLowerCase() === mes) || 'Enero';
-      const mesIdxStr = (mesesDelAno.findIndex(m => m.toLowerCase() === mes) + 1).toString().padStart(2, '0');
-      
       lineasFinales.push({
-        id: `REC-${clave}`, anio: anio, mes: mesNombreOriginal,
+        id: `REC-${clave}`, anio: valores.anioStr, mes: valores.mesNombre,
         descripcion: `Recaudación Total Percibida en Caja (Flujo Real)`, referencia: `Pestaña 3`,
         ingreso_usd: valores.usd, gasto_usd: 0, ingreso_bs: valores.bs, gasto_bs: 0,
-        tipo: 'INGRESO', fecha_sort: `${anio}-${mesIdxStr}-01T00:00:00.000Z`
+        tipo: 'INGRESO', fecha_sort: `${valores.anioStr}-${valores.mesIdx.toString().padStart(2, '0')}-01T00:00:00.000Z`
       });
     });
 
@@ -284,7 +296,7 @@ export default function ERPTorreD10() {
   // --- FUNCIÓN GLOBAL DE IMPRESIÓN ---
   const handlePrint = (titulo: string) => { window.print(); };
 
-  // --- REDUCER PESTAÑA 1 (CORREGIDO) ---
+  // --- REDUCER PESTAÑA 1 ---
   const finanzasTab1Calculadas = useMemo(() => {
     const tFiltradas = libroDiarioConsolidado.filter(t => 
       (filtroAnioTab1 === 'TODOS' || t.anio?.toString().trim() === filtroAnioTab1.trim()) &&
@@ -638,7 +650,10 @@ export default function ERPTorreD10() {
                       libroDiarioFiltrado.map((t, index) => (
                         <tr key={index} className="hover:bg-slate-800/40">
                           <td className="p-4 font-mono border-r border-slate-800/60"><span className="font-bold text-white">{t.anio}</span> <span className="text-slate-400 text-[10px]">{t.mes}</span></td>
-                          <td className="p-4"><div className="font-medium text-slate-200">{t.descripcion}</div><div className="text-[10px] text-slate-500 font-mono">Ref: {t.referencia}</div></td>
+                          {/* COLUMNA DESCRIPCIÓN CON AUTOAJUSTE DE LÍNEAS MULTIPLES Y REMOCIÓN DE REF */}
+                          <td className="p-4 whitespace-normal break-words max-w-[320px] leading-relaxed">
+                            <div className="font-medium text-slate-200">{t.descripcion}</div>
+                          </td>
                           <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_usd) > 0 ? `+${formatMoney(t.ingreso_usd)}` : '-'}</td>
                           <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_usd) > 0 ? `-${formatMoney(t.gasto_usd)}` : '-'}</td>
                           <td className="p-4 text-right font-mono font-bold bg-slate-950/40 text-slate-100">{formatMoney(t.saldo_usd)}</td>
@@ -693,7 +708,26 @@ export default function ERPTorreD10() {
                   <div className="bg-gray-50 p-4 rounded border border-gray-300"><p className="text-[10px] font-bold text-gray-600 uppercase mb-2">Neto USD</p><div className="flex justify-between text-xs mb-1"><span>Ingresos:</span><span className="text-emerald-700 font-bold">+${formatMoney(mIngUSD)}</span></div><div className="flex justify-between text-xs mb-1"><span>Egresos:</span><span className="text-red-700 font-bold">-${formatMoney(mGstUSD)}</span></div><div className="flex justify-between text-sm border-t border-gray-300 pt-1 font-bold"><span>Total:</span><span className={mIngUSD - mGstUSD >= 0 ? 'text-emerald-700' : 'text-red-700'}>${formatMoney(mIngUSD - mGstUSD)}</span></div></div>
                   <div className="bg-gray-50 p-4 rounded border border-gray-300"><p className="text-[10px] font-bold text-gray-600 uppercase mb-2">Neto Bolívares</p><div className="flex justify-between text-xs mb-1"><span>Ingresos:</span><span className="text-emerald-700 font-bold">+Bs {formatMoney(mIngBS)}</span></div><div className="flex justify-between text-xs mb-1"><span>Egresos:</span><span className="text-red-700 font-bold">-Bs {formatMoney(mGstBS)}</span></div><div className="flex justify-between text-sm border-t border-gray-300 pt-1 font-bold"><span>Total:</span><span className={mIngBS - mGstBS >= 0 ? 'text-emerald-700' : 'text-red-700'}>Bs {formatMoney(mIngBS - mGstBS)}</span></div></div>
                 </div>
-                <table className="w-full text-left text-[11px] whitespace-nowrap"><thead className="bg-gray-800 text-white uppercase text-[9px]"><tr><th className="p-2">ID</th><th className="p-2">Descripción</th><th className="p-2 text-right">Ingreso $</th><th className="p-2 text-right">Egreso $</th><th className="p-2 text-right">Saldo $</th><th className="p-2 text-right">Ingreso Bs</th><th className="p-2 text-right">Egreso Bs</th><th className="p-2 text-right">Saldo Bs</th></tr></thead><tbody className="divide-y divide-gray-200">{transaccionesMesTab5.map((t, idx) => (<tr key={idx}><td className="p-2 text-gray-500 font-mono">#{t.id}</td><td className="p-2 text-gray-800 font-medium truncate max-w-[180px]">{t.descripcion}</td><td className="p-2 text-right font-mono text-emerald-700">+${formatMoney(t.ingreso_usd)}</td><td className="p-2 text-right font-mono text-red-700">-${formatMoney(t.gasto_usd)}</td><td className="p-2 text-right font-mono font-bold bg-gray-100">{formatMoney(t.saldo_usd)}</td><td className="p-2 text-right font-mono text-emerald-700">+Bs {formatMoney(t.ingreso_bs)}</td><td className="p-2 text-right font-mono text-red-700">-Bs {formatMoney(t.gasto_bs)}</td><td className="p-2 text-right font-mono font-bold bg-gray-100">{formatMoney(t.saldo_bs)}</td></tr>))}</tbody></table>
+                <table className="w-full text-left text-[11px] whitespace-nowrap">
+                  <thead className="bg-gray-800 text-white uppercase text-[9px]">
+                    <tr><th className="p-2">ID</th><th className="p-2">Descripción</th><th className="p-2 text-right">Ingreso $</th><th className="p-2 text-right">Egreso $</th><th className="p-2 text-right">Saldo $</th><th className="p-2 text-right">Ingreso Bs</th><th className="p-2 text-right">Egreso Bs</th><th className="p-2 text-right">Saldo Bs</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {transaccionesMesTab5.map((t, idx) => (
+                      <tr key={idx}>
+                        <td className="p-2 text-gray-500 font-mono">#{t.id}</td>
+                        {/* PESTAÑA 5: DESCRIPCIÓN CON AUTOAJUSTE DE LÍNEAS MULTIPLES SIN RECORTE */}
+                        <td className="p-2 text-gray-800 font-medium whitespace-normal break-words max-w-[280px] leading-relaxed">{t.descripcion}</td>
+                        <td className="p-2 text-right font-mono text-emerald-700">+${formatMoney(t.ingreso_usd)}</td>
+                        <td className="p-2 text-right font-mono text-red-700">-${formatMoney(t.gasto_usd)}</td>
+                        <td className="p-2 text-right font-mono font-bold bg-gray-100">{formatMoney(t.saldo_usd)}</td>
+                        <td className="p-2 text-right font-mono text-emerald-700">+Bs {formatMoney(t.ingreso_bs)}</td>
+                        <td className="p-2 text-right font-mono text-red-700">-Bs {formatMoney(t.gasto_bs)}</td>
+                        <td className="p-2 text-right font-mono font-bold bg-gray-100">{formatMoney(t.saldo_bs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -742,7 +776,7 @@ export default function ERPTorreD10() {
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Piso</label><input type="text" value={editingProp.piso || ''} onChange={e => setEditingProp({...editingProp, piso: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white capitalize"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-sm text-white capitalize"><option value="">-- Mes --</option>{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Año de Ingreso</label><select value={editingProp.inicio_ano || ''} onChange={e => setEditingProp({...editingProp, inicio_ano: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white"><option value="">-- Año --</option>{listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
               </div>
               <div className="flex gap-3 pt-2">

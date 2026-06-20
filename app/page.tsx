@@ -31,7 +31,6 @@ export default function ERPTorreD10() {
   // --- FORMULARIOS ---
   const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
   
-  // Formulario Pestaña 3 optimizado
   const [autoMesPendiente, setAutoMesPendiente] = useState(true);
   const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
 
@@ -60,7 +59,6 @@ export default function ERPTorreD10() {
     return [...new Set(propietarios.map(p => p.piso?.toString()).filter(Boolean))].sort((a, b) => Number(a) - Number(b));
   }, [propietarios]);
 
-  // --- FUNCIÓN PARA CERRAR SESIÓN ---
   const handleLogout = () => { 
     setIsAuth(false); 
     setPin(''); 
@@ -96,14 +94,19 @@ export default function ERPTorreD10() {
     }
   }, [listaPisos, pisoActivoTab6]);
 
-  // --- DETECTAR Y CALCULAR AUTOMÁTICAMENTE EL SIGUIENTE MES PENDIENTE CRONOLÓGICO ---
+  // --- DETECTAR Y CALCULAR AUTOMÁTICAMENTE EL SIGUIENTE MES PENDIENTE ---
   const siguienteMesPendienteCalculado = useMemo(() => {
     if (!formPagoResidente.apartamento || !autoMesPendiente) return null;
     
     const resInfo = propietarios.find(p => p.apartamento === formPagoResidente.apartamento);
     const pagosDelApto = pagosResidentes.filter(p => p.apartamento === formPagoResidente.apartamento);
     
-    const mapaPagos = new Set(pagosDelApto.map(p => `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`));
+    // Solo consideramos pagados los meses que tengan un abono real
+    const mapaPagos = new Set(
+      pagosDelApto
+        .filter(p => Number(p.monto_pagado_usd) > 0 || Number(p.monto_pagado_bs) > 0)
+        .map(p => `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`)
+    );
 
     let anioIterador = 2025;
     let mesIterador = 0; 
@@ -135,7 +138,6 @@ export default function ERPTorreD10() {
     return { mes: mesesDelAno[mAct], anio: aAct.toString() };
   }, [formPagoResidente.apartamento, autoMesPendiente, pagosResidentes, propietarios]);
 
-  // Sincronizar el formulario si la automatización está activa
   useEffect(() => {
     if (siguienteMesPendienteCalculado && autoMesPendiente) {
       setFormPagoResidente(prev => ({
@@ -148,9 +150,7 @@ export default function ERPTorreD10() {
 
   const fetchTransacciones = async () => {
     const { data } = await supabase.from('finanzas_d10').select('*').order('fecha', { ascending: true }).order('id', { ascending: true });
-    if (data) {
-      setTransacciones(data);
-    }
+    if (data) setTransacciones(data);
   };
 
   const fetchPagosResidentes = async () => {
@@ -163,29 +163,43 @@ export default function ERPTorreD10() {
     if (data) setPropietarios(data.sort((a, b) => a.apartamento.localeCompare(b.apartamento, undefined, { numeric: true, sensitivity: 'base' })));
   };
 
-  // --- LIBRO DIARIO CONSOLIDADO: INGRESOS POR FECHA FÍSICA REAL DE CAJA ---
+  // --- LIBRO DIARIO CONSOLIDADO CON PARSER DE FECHAS ROBUSTO ---
   const libroDiarioConsolidado = useMemo(() => {
     const ingresosAgrupados = new Map<string, { usd: number, bs: number }>();
     
-    // Agrupar los cobros basándonos estrictamente en la fecha física real en la que entró el dinero
     pagosResidentes.forEach(p => {
-      let anioPagoReal = '2025';
-      let mesPagoReal = 'Enero';
+      // Filtrar filas de Excel sin abonos
+      const mUSD = Number(p.monto_pagado_usd || 0);
+      const mBS = Number(p.monto_pagado_bs || 0);
+      if (mUSD === 0 && mBS === 0) return; 
+
+      let anioPagoReal = p.anio_correspondiente?.toString() || '2025';
+      let mesPagoReal = p.mes_correspondiente || 'Enero';
       
-      try {
-        if (p.fecha_pago_real && p.fecha_pago_real.includes('-')) {
-          const partes = p.fecha_pago_real.split('-');
-          anioPagoReal = partes[0].trim();
-          mesPagoReal = mesesDelAno[parseInt(partes[1], 10) - 1];
+      // Parser robusto para fechas físicas (YYYY-MM-DD, DD/MM/YYYY, etc.)
+      const fechaStr = p.fecha_pago_real ? p.fecha_pago_real.toString().trim() : '';
+      let mesIndice = -1;
+
+      if (fechaStr) {
+        if (fechaStr.includes('-')) {
+          const pt = fechaStr.split('-');
+          if (pt[0].length === 4) { anioPagoReal = pt[0]; mesIndice = parseInt(pt[1], 10) - 1; } 
+          else if (pt[2].length === 4) { anioPagoReal = pt[2]; mesIndice = parseInt(pt[1], 10) - 1; }
+        } else if (fechaStr.includes('/')) {
+          const pt = fechaStr.split('/');
+          if (pt[2].length === 4) { anioPagoReal = pt[2]; mesIndice = parseInt(pt[1], 10) - 1; }
+          else if (pt[0].length === 4) { anioPagoReal = pt[0]; mesIndice = parseInt(pt[1], 10) - 1; }
+        } else {
+          const d = new Date(fechaStr);
+          if (!isNaN(d.getTime())) { anioPagoReal = d.getFullYear().toString(); mesIndice = d.getMonth(); }
         }
-      } catch(err) {
-        anioPagoReal = p.anio_correspondiente?.toString() || '2025';
-        mesPagoReal = p.mes_correspondiente || 'Enero';
+      }
+
+      if (mesIndice >= 0 && mesIndice <= 11) {
+         mesPagoReal = mesesDelAno[mesIndice];
       }
 
       const clave = `${mesPagoReal.toLowerCase().trim()}-${anioPagoReal.trim()}`;
-      const mUSD = Number(p.monto_pagado_usd || 0);
-      const mBS = Number(p.monto_pagado_bs || 0);
       
       if (!ingresosAgrupados.has(clave)) {
         ingresosAgrupados.set(clave, { usd: 0, bs: 0 });
@@ -199,46 +213,29 @@ export default function ERPTorreD10() {
     let saldoBS = 0;
     const lineasFinales: any[] = [];
     
-    // Inyectar egresos/gastos operativos puros
     transacciones.forEach(t => {
       if (Number(t.gasto_usd) > 0 || Number(t.gasto_bs) > 0) {
         lineasFinales.push({
-          id: t.id,
-          anio: t.anio,
-          mes: t.mes,
-          descripcion: t.descripcion,
-          referencia: t.referencia,
-          ingreso_usd: 0,
-          gasto_usd: Number(t.gasto_usd || 0),
-          ingreso_bs: 0,
-          gasto_bs: Number(t.gasto_bs || 0),
-          tipo: 'GASTO',
-          fecha_sort: t.fecha || new Date().toISOString()
+          id: t.id, anio: t.anio, mes: t.mes, descripcion: t.descripcion, referencia: t.referencia,
+          ingreso_usd: 0, gasto_usd: Number(t.gasto_usd || 0), ingreso_bs: 0, gasto_bs: Number(t.gasto_bs || 0),
+          tipo: 'GASTO', fecha_sort: t.fecha || new Date().toISOString()
         });
       }
     });
 
-    // Inyectar flujos de ingreso consolidados al mes físico real de cobro
     ingresosAgrupados.forEach((valores, clave) => {
       const [mes, anio] = clave.split('-');
       const mesNombreOriginal = mesesDelAno.find(m => m.toLowerCase() === mes) || 'Enero';
+      const mesIdxStr = (mesesDelAno.findIndex(m => m.toLowerCase() === mes) + 1).toString().padStart(2, '0');
       
       lineasFinales.push({
-        id: `REC-${clave}`,
-        anio: anio,
-        mes: mesNombreOriginal,
-        descripcion: `Recaudación Total Percibida en Caja (Criterio de Flujo Real)`,
-        referencia: `Pestaña 3`,
-        ingreso_usd: valores.usd,
-        gasto_usd: 0,
-        ingreso_bs: valores.bs,
-        gasto_bs: 0,
-        tipo: 'INGRESO',
-        fecha_sort: `${anio}-${(mesesDelAno.findIndex(m => m.toLowerCase() === mes) + 1).toString().padStart(2, '0')}-01T00:00:00.000Z`
+        id: `REC-${clave}`, anio: anio, mes: mesNombreOriginal,
+        descripcion: `Recaudación Total Percibida en Caja (Flujo Real)`, referencia: `Pestaña 3`,
+        ingreso_usd: valores.usd, gasto_usd: 0, ingreso_bs: valores.bs, gasto_bs: 0,
+        tipo: 'INGRESO', fecha_sort: `${anio}-${mesIdxStr}-01T00:00:00.000Z`
       });
     });
 
-    // Clasificación cronológica precisa para balances de arrastre continuos
     lineasFinales.sort((a, b) => a.fecha_sort.localeCompare(b.fecha_sort));
 
     return lineasFinales.map(l => {
@@ -249,11 +246,8 @@ export default function ERPTorreD10() {
   }, [transacciones, pagosResidentes]);
 
   const handleEliminarTransaccion = async (id: any) => {
-    if (id.toString().includes('REC-')) {
-      alert("ℹ️ Los flujos de ingreso centralizados se deben eliminar directamente borrando el recibo origen desde la Pestaña 3.");
-      return;
-    }
-    if (!window.confirm("⚠️ ¿Desea eliminar este egreso del libro diario operativo?")) return;
+    if (id.toString().includes('REC-')) return alert("ℹ️ Los flujos de ingreso se eliminan borrando el recibo origen desde la Pestaña 3.");
+    if (!window.confirm("⚠️ ¿Desea eliminar este egreso?")) return;
     const { error } = await supabase.from('finanzas_d10').delete().eq('id', id);
     if (error) alert(error.message); else { alert("✅ Registro eliminado."); fetchTransacciones(); }
   };
@@ -276,19 +270,18 @@ export default function ERPTorreD10() {
     if (!formPagoResidente.apartamento || !formPagoResidente.mes_seleccionado) return alert("Por favor complete los campos obligatorios.");
     const piso = formPagoResidente.apartamento.split('-')[0];
     const mUSD = Number(formPagoResidente.monto_pagado_usd)||0, mBS = Number(formPagoResidente.monto_pagado_bs)||0;
-    const fechaRealStr = formPagoResidente.fecha_pago_real;
 
     const { error } = await supabase.from('pagos_residentes').insert([{ 
       apartamento: formPagoResidente.apartamento, piso, 
       mes_correspondiente: formPagoResidente.mes_seleccionado, 
       anio_correspondiente: formPagoResidente.anio_correspondiente, 
       monto_pagado_usd: mUSD, monto_pagado_bs: mBS, 
-      fecha_pago_real: fechaRealStr,
+      fecha_pago_real: formPagoResidente.fecha_pago_real,
       descripcion: formPagoResidente.descripcion || 'Abono de condominio'
     }]);
     if (error) return alert(error.message);
     
-    alert("✅ Recaudación guardada con éxito."); 
+    alert("✅ Recaudación guardada."); 
     setFormPagoResidente({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion: '' });
     fetchPagosResidentes();
   };
@@ -308,26 +301,19 @@ export default function ERPTorreD10() {
   const handlePrint = (t: string) => { const o = document.title; document.title = t; window.print(); setTimeout(() => { document.title = o; }, 1000); };
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
-  // --- REDUCER DINÁMICO DE LA PESTAÑA 1 (INGRESOS DE P3 + GASTOS DE P4 POR AÑO REAL) ---
   const finanzasTab1Calculadas = useMemo(() => {
     const tFiltradas = libroDiarioConsolidado.filter(t => filtroAnioTab1 === 'TODOS' || t.anio?.toString() === filtroAnioTab1);
-    
     const iUSD = tFiltradas.reduce((acc, t) => acc + Number(t.ingreso_usd || 0), 0);
     const gUSD = tFiltradas.reduce((acc, t) => acc + Number(t.gasto_usd || 0), 0);
     const iBS = tFiltradas.reduce((acc, t) => acc + Number(t.ingreso_bs || 0), 0);
     const gBS = tFiltradas.reduce((acc, t) => acc + Number(t.gasto_bs || 0), 0);
-
-    return {
-      ingresoUSD: iUSD, gastoUSD: gUSD, saldoUSD: iUSD - gUSD,
-      ingresoBs: iBS, gastoBs: gBS, saldoBs: iBS - gBS
-    };
+    return { ingresoUSD: iUSD, gastoUSD: gUSD, saldoUSD: iUSD - gUSD, ingresoBs: iBS, gastoBs: gBS, saldoBs: iBS - gBS };
   }, [libroDiarioConsolidado, filtroAnioTab1]);
 
-  // --- MOTOR CONTABLE CRONOLÓGICO BLINDADO DE LA PESTAÑA 2 ---
+  // --- MOTOR CONTABLE PESTAÑA 2: IGNORAR FILAS VACÍAS IMPORTADAS ---
   const estadoDeCuentaGenerado = useMemo(() => {
     if (!filtroAptoTab2) return { lineas: [], deudaTotalUSD: 0, totalAbonadoUSD: 0, totalAbonadoBs: 0, propietario: null };
     
-    // CORREGIDO: proprietors -> propietarios y tipado explícito del parámetro p
     const resInfo = propietarios.find((p: any) => p.apartamento === filtroAptoTab2);
     const pagosDelApto = pagosResidentes.filter(p => p.apartamento === filtroAptoTab2);
     
@@ -335,10 +321,15 @@ export default function ERPTorreD10() {
     let tUSD = 0, tBS = 0;
 
     pagosDelApto.forEach(p => {
-      tUSD += Number(p.monto_pagado_usd || 0); 
-      tBS += Number(p.monto_pagado_bs || 0);
-      const clave = `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`;
-      mapaPagos.set(clave, p);
+      const mUSD = Number(p.monto_pagado_usd || 0);
+      const mBS = Number(p.monto_pagado_bs || 0);
+      tUSD += mUSD; tBS += mBS;
+      
+      // Solo consideramos pago si hay un monto real
+      if (mUSD > 0 || mBS > 0) {
+        const clave = `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente?.toString().trim()}`;
+        mapaPagos.set(clave, p);
+      }
     });
 
     let anioIterador = 2025;
@@ -356,18 +347,21 @@ export default function ERPTorreD10() {
     while (anioIterador < aAct || (anioIterador === aAct && mesIterador <= mAct)) {
       const nomMes = mesesDelAno[mesIterador];
       const claveBusqueda = `${nomMes.toLowerCase()}-${anioIterador}`;
-      const pago = mapaPagos.get(claveBusqueda);
+      const pagoReal = mapaPagos.get(claveBusqueda);
 
-      if (pago) {
-        let fPago = pago.fecha_pago_real || '';
-        if(fPago.includes('-')) { const pt = fPago.split('-'); fPago = `${pt[2]}/${pt[1]}/${pt[0]}`; }
+      if (pagoReal) {
+        let fPago = pagoReal.fecha_pago_real || '';
+        if (fPago.includes('-') && fPago.split('-').length === 3) { 
+          const pt = fPago.split('-'); 
+          if(pt[0].length === 4) fPago = `${pt[2]}/${pt[1]}/${pt[0]}`; 
+        }
         
         lineas.push({
           periodo: `${nomMes} ${anioIterador}`,
           estatus: 'PAGADO',
           cargos: 0,
-          desc_ref: pago.descripcion || `Pago cuota realizado el ${fPago}`,
-          fecha_ejecucion: fPago || new Date(pago.created_at).toLocaleDateString()
+          desc_ref: pagoReal.descripcion || `Pago cuota realizado el ${fPago}`,
+          fecha_ejecucion: fPago || 'Fecha no registrada'
         });
       } else {
         lineas.push({
@@ -375,7 +369,7 @@ export default function ERPTorreD10() {
           estatus: 'PENDIENTE',
           cargos: CUOTA_MENSUAL_USD,
           desc_ref: 'Cuota Condominio Pendiente de Pago',
-          fecha_ejecucion: '-'
+          fecha_ejecucion: 'Pendiente por pagar'
         });
         deudaAcumulada += CUOTA_MENSUAL_USD;
       }
@@ -385,13 +379,13 @@ export default function ERPTorreD10() {
     return { lineas, deudaTotalUSD: deudaAcumulada, totalAbonadoUSD: tUSD, totalAbonadoBs: tBS, propietario: resInfo };
   }, [filtroAptoTab2, pagosResidentes, propietarios]);
 
-  // --- FILTRADO AVANZADO DE LA TABLA (PESTAÑA 3) ---
+  // --- FILTRADO AVANZADO (PESTAÑA 3) ---
   const dataResidentesFiltrada = useMemo(() => {
     return pagosResidentes.filter(p => {
       let fPagoFormateada = p.fecha_pago_real || '';
       if(fPagoFormateada.includes('-')) {
         const pt = fPagoFormateada.split('-');
-        fPagoFormateada = `${pt[2]}/${pt[1]}/${pt[0]}`;
+        if(pt[0].length === 4) fPagoFormateada = `${pt[2]}/${pt[1]}/${pt[0]}`;
       }
 
       return (
@@ -399,7 +393,7 @@ export default function ERPTorreD10() {
         (filtroMes === '' || p.mes_correspondiente?.toString().toLowerCase().trim() === filtroMes.toLowerCase().trim()) && 
         (filtroPiso === '' || p.piso?.toString().trim() === filtroPiso.trim()) && 
         (filtroApto === '' || p.apartamento?.toString().toLowerCase().trim() === filtroApto.toLowerCase().trim()) &&
-        (filtroFechaPagoReal === '' || fPagoFormateada.includes(filtroFechaPagoReal) || p.fecha_pago_real.includes(filtroFechaPagoReal))
+        (filtroFechaPagoReal === '' || fPagoFormateada.includes(filtroFechaPagoReal) || (p.fecha_pago_real && p.fecha_pago_real.includes(filtroFechaPagoReal)))
       );
     });
   }, [pagosResidentes, filtroAnio, filtroMes, filtroPiso, filtroApto, filtroFechaPagoReal]);
@@ -438,7 +432,6 @@ export default function ERPTorreD10() {
         .page-header-print { display: none; }
       `}</style>
       
-      {/* HEADER PRINCIPAL */}
       <header className="no-print bg-emerald-900 border-b border-emerald-800 py-4 px-6 sticky top-0 z-40 shadow-xl bg-opacity-95 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto flex flex-col gap-4">
           <div className="flex items-center justify-between w-full">
@@ -463,7 +456,7 @@ export default function ERPTorreD10() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8">
         
-        {/* PESTAÑA 1: RESUMEN CONTABLE */}
+        {/* PESTAÑA 1 */}
         {activeTab === 'RESUMEN' && (
           <div className="space-y-6 no-print">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -490,7 +483,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 2: ESTADO DE CUENTA */}
+        {/* PESTAÑA 2 */}
         {activeTab === 'BUSQUEDA' && (
           <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-800 pb-2">
@@ -537,7 +530,7 @@ export default function ERPTorreD10() {
                   </div>
                   <div className="border border-emerald-300 bg-emerald-50 p-3 rounded">
                     <p className="text-[9px] text-emerald-800 uppercase tracking-widest font-bold">Abonado Total USD</p>
-                    <p className="text-xl font-mono font-bold text-red-700">${formatMoney(estadoDeCuentaGenerado.totalAbonadoUSD)}</p>
+                    <p className="text-xl font-mono font-bold text-emerald-700">${formatMoney(estadoDeCuentaGenerado.totalAbonadoUSD)}</p>
                   </div>
                   <div className="border border-gray-300 bg-gray-100 p-3 rounded">
                     <p className="text-[9px] text-gray-700 uppercase tracking-widest font-bold">Abonado Total Bs</p>
@@ -548,7 +541,7 @@ export default function ERPTorreD10() {
                 <table className="w-full text-left text-xs whitespace-nowrap print-table">
                   <thead className="bg-gray-800 text-white font-mono uppercase text-[9px]">
                     <tr>
-                      <th className="p-2.5">Periodo Objeto</th>
+                      <th className="p-2.5">Mes Condominio</th>
                       <th className="p-2.5">Estatus</th>
                       <th className="p-2.5">Fecha Pago Real</th>
                       <th className="p-2.5 text-right">Monto Cuota</th>
@@ -572,7 +565,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 3: RECAUDACIÓN AUTOMATIZADA CON FORMULARIO LIBRE Y FILTROS EXCEL */}
+        {/* PESTAÑA 3 */}
         {activeTab === 'BASE_DATOS' && (
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Mayor de Cobros Manuales</h2>
@@ -627,12 +620,11 @@ export default function ERPTorreD10() {
               <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Registrar Cobro</button></div>
             </form>
 
-            {/* TABLA CON FILTROS INTEGRADOS EN ENCABEZADOS ESTILO EXCEL */}
             <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
               <table className="w-full text-left text-xs table-fixed">
                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px] border-b border-slate-800">
                   <tr>
-                    <th className="p-3 w-28">
+                    <th className="p-3 w-20">
                       <div className="space-y-1">
                         <span>Piso</span>
                         <select value={filtroPiso} onChange={e => setFiltroPiso(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans normal-case outline-none">
@@ -659,7 +651,7 @@ export default function ERPTorreD10() {
                         </select>
                       </div>
                     </th>
-                    <th className="p-3 w-28">
+                    <th className="p-3 w-20">
                       <div className="space-y-1">
                         <span>Año</span>
                         <select value={filtroAnio} onChange={e => setFiltroAnio(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans normal-case outline-none">
@@ -674,10 +666,10 @@ export default function ERPTorreD10() {
                         <input type="text" placeholder="Buscar..." value={filtroFechaPagoReal} onChange={e => setFiltroFechaPagoReal(e.target.value)} className="w-full p-1 bg-slate-900 border border-slate-700 rounded text-[9px] text-slate-300 font-sans outline-none font-normal" />
                       </div>
                     </th>
-                    <th className="p-3 w-72">Descripción / Nomenclatura Completa</th>
-                    <th className="p-3 text-right w-28">Abono USD</th>
-                    <th className="p-3 text-right w-32">Abono Bs</th>
-                    <th className="p-3 text-center w-20">Acción</th>
+                    <th className="p-3 w-64">Descripción / Nomenclatura Completa</th>
+                    <th className="p-3 text-right w-24">Abono USD</th>
+                    <th className="p-3 text-right w-28">Abono Bs</th>
+                    <th className="p-3 text-center w-24">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -708,7 +700,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 4: LIBRO DIARIO OPERATIVO */}
+        {/* PESTAÑA 4 */}
         {activeTab === 'GASTOS_GRAL' && (
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Diario de Caja Operativo</h2>
@@ -751,7 +743,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 5: CIERRE MENSUAL */}
+        {/* PESTAÑA 5 */}
         {activeTab === 'GASTOS_MENSUAL' && (
           <div className="space-y-6 no-print">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2"><h2 className="text-xl font-bold text-slate-300">Cierre Contable Mensual</h2>{filtroMesTab5 && <button onClick={() => handlePrint(`Cierre Mensual - ${filtroMesTab5} ${filtroAnioTab5}`)} className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded text-xs uppercase tracking-widest shadow-md transition-all">🖨️ Imprimir Cierre</button>}</div>
@@ -772,7 +764,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 6: GESTIÓN DE DATOS */}
+        {/* PESTAÑA 6 */}
         {activeTab === 'GESTION_DATOS' && (
           <div className="no-print flex flex-col gap-6 animate-fadeIn">
             <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">

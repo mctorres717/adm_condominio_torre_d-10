@@ -10,12 +10,6 @@ const supabase = createClient(
 
 type TabType = 'RESUMEN' | 'BUSQUEDA' | 'BASE_DATOS' | 'GASTOS_GRAL' | 'GASTOS_MENSUAL' | 'GESTION_DATOS';
 
-const numeroALetras = (num: number): string => {
-  const u = ['cero', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte', 'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta', 'treinta y un'];
-  return u[num] || num.toString();
-};
-
-const mesesLetras = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const mesesDelAno = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const listaAniosFiltro = ['2023', '2024', '2025', '2026', '2027'];
 
@@ -31,9 +25,15 @@ export default function ERPTorreD10() {
   const [pagosResidentes, setPagosResidentes] = useState<any[]>([]);
   const [propietarios, setPropietarios] = useState<any[]>([]);
 
+  // --- FILTRO POR AÑO PESTAÑA 1 ---
+  const [filtroAnioTab1, setFiltroAnioTab1] = useState<string>('TODOS');
+
   // --- FORMULARIOS ---
   const [formGasto, setFormGasto] = useState({ anio: new Date().getFullYear().toString(), mes: '', referencia: '', descripcion: '', gasto_usd: '', gasto_bs: '' });
-  const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: '', descripcion: '' });
+  
+  // Formulario Pestaña 3 con automatización de mes pendiente
+  const [autoMesPendiente, setAutoMesPendiente] = useState(true);
+  const [formPagoResidente, setFormPagoResidente] = useState({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion_extra: '' });
 
   // --- FILTROS TAB 3 (RECAUDACIÓN) ---
   const [filtroAnio, setFiltroAnio] = useState('');
@@ -46,11 +46,11 @@ export default function ERPTorreD10() {
   const [filtroMesTab5, setFiltroMesTab5] = useState('');
   const [filtroAnioTab5, setFiltroAnioTab5] = useState(new Date().getFullYear().toString());
 
-  // --- FILTROS TAB 6 (ANTIGUA 7 - GESTIÓN) ---
+  // --- FILTROS TAB 6 (GESTIÓN) ---
   const [pisoActivoTab6, setPisoActivoTab6] = useState<string>('');
   const [editingProp, setEditingProp] = useState<any>(null);
 
-  // Listas extraídas dinámicamente del censo de propietarios
+  // Listas dinámicas basadas en el censo
   const listaApartamentos = useMemo(() => {
     return [...new Set(propietarios.map(p => p.apartamento))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   }, [propietarios]);
@@ -82,6 +82,56 @@ export default function ERPTorreD10() {
     }
   }, [listaPisos, pisoActivoTab6]);
 
+  // --- DETECTAR Y CALCULAR AUTOMÁTICAMENTE EL SIGUIENTE MES PENDIENTE CRONOLÓGICO ---
+  const siguienteMesPendienteCalculado = useMemo(() => {
+    if (!formPagoResidente.apartamento || !autoMesPendiente) return null;
+    
+    const resInfo = propietarios.find(p => p.apartamento === formPagoResidente.apartamento);
+    const pagosDelApto = pagosResidentes.filter(p => p.apartamento === formPagoResidente.apartamento);
+    
+    const mapaPagos = new Set(pagosDelApto.map(p => `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente}`));
+
+    let anioIterador = 2025;
+    let mesIterador = 0; 
+
+    if (resInfo && resInfo.inicio_ano && resInfo.inicio_mes) {
+      anioIterador = Number(resInfo.inicio_ano);
+      const idxMes = mesesDelAno.findIndex(m => m.toLowerCase() === resInfo.inicio_mes.toLowerCase().trim());
+      if (idxMes !== -1) mesIterador = idxMes;
+    }
+
+    const hoy = new Date();
+    const aAct = hoy.getFullYear();
+    const mAct = hoy.getMonth();
+
+    while (anioIterador < aAct || (anioIterador === aAct && mesIterador <= mAct)) {
+      const nomMes = mesesDelAno[mesIterador];
+      const claveBusqueda = `${nomMes.toLowerCase()}-${anioIterador}`;
+      
+      if (!mapaPagos.has(claveBusqueda)) {
+        return { mes: nomMes, anio: anioIterador.toString() };
+      }
+      
+      mesIterador++;
+      if (mesIterador > 11) {
+        mesIterador = 0;
+        anioIterador++;
+      }
+    }
+    return { mes: mesesDelAno[mAct], anio: aAct.toString() };
+  }, [formPagoResidente.apartamento, autoMesPendiente, pagosResidentes, propietarios]);
+
+  // Sincronizar el formulario si la automatización está activa
+  useEffect(() => {
+    if (siguienteMesPendienteCalculado && autoMesPendiente) {
+      setFormPagoResidente(prev => ({
+        ...prev,
+        mes_seleccionado: siguienteMesPendienteCalculado.mes,
+        anio_correspondiente: siguienteMesPendienteCalculado.anio
+      }));
+    }
+  }, [siguienteMesPendienteCalculado, autoMesPendiente]);
+
   const fetchTransacciones = async () => {
     const { data } = await supabase.from('finanzas_d10').select('*').order('fecha', { ascending: true }).order('id', { ascending: true });
     if (data) {
@@ -104,6 +154,10 @@ export default function ERPTorreD10() {
     e.preventDefault();
     if (pin === 'admin') { setIsAuth(true); if (typeof window !== 'undefined') localStorage.setItem('finanzasAuth', 'true'); }
     else alert('Clave de acceso denegada.');
+  };
+
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    handleLogin(e);
   };
 
   const handleLogout = () => { setIsAuth(false); setPin(''); if (typeof window !== 'undefined') localStorage.removeItem('finanzasAuth'); };
@@ -132,7 +186,10 @@ export default function ERPTorreD10() {
     if (!formPagoResidente.apartamento || !formPagoResidente.mes_seleccionado) return alert("Por favor complete los campos obligatorios.");
     const piso = formPagoResidente.apartamento.split('-')[0];
     const mUSD = Number(formPagoResidente.monto_pagado_usd)||0, mBS = Number(formPagoResidente.monto_pagado_bs)||0;
-    const fechaRealStr = formPagoResidente.fecha_pago_real || new Date().toISOString().split('T')[0];
+    const fechaRealStr = formPagoResidente.fecha_pago_real;
+
+    // Nomenclatura automática solicitada para la descripción
+    const descripcionEstructurada = `PAGO MES DE ${formPagoResidente.mes_seleccionado.toUpperCase()} ${formPagoResidente.anio_correspondiente}${formPagoResidente.descripcion_extra ? ' - ' + formPagoResidente.descripcion_extra : ''}`;
 
     const { error } = await supabase.from('pagos_residentes').insert([{ 
       apartamento: formPagoResidente.apartamento, piso, 
@@ -140,20 +197,34 @@ export default function ERPTorreD10() {
       anio_correspondiente: formPagoResidente.anio_correspondiente, 
       monto_pagado_usd: mUSD, monto_pagado_bs: mBS, 
       fecha_pago_real: fechaRealStr,
-      descripcion: formPagoResidente.descripcion || 'Abono de condominio' 
+      descripcion: descripcionEstructurada
     }]);
     if (error) return alert(error.message);
 
+    // Inyección automatizada en el Libro Diario (Pestaña 4) con base en la Fecha Física de Pago
+    let anioPagoReal = formPagoResidente.anio_correspondiente;
+    let mesPagoReal = formPagoResidente.mes_seleccionado;
+    try {
+      if (fechaRealStr.includes('-')) {
+        const p = fechaRealStr.split('-');
+        anioPagoReal = p[0];
+        mesPagoReal = mesesDelAno[parseInt(p[1]) - 1];
+      }
+    } catch(err){}
+
     if (mUSD > 0 || mBS > 0) {
       await supabase.from('finanzas_d10').insert([{ 
-        fecha: new Date().toISOString(), anio: formPagoResidente.anio_correspondiente, mes: formPagoResidente.mes_seleccionado, 
+        fecha: new Date(fechaRealStr + 'T12:00:00').toISOString(), 
+        anio: anioPagoReal, 
+        mes: mesPagoReal, 
         referencia: `Apto ${formPagoResidente.apartamento}`, 
-        descripcion: `Ingreso Condominio: Cuota de ${formPagoResidente.mes_seleccionado} realizada el ${fechaRealStr}`, 
+        descripcion: `Recaudación: ${descripcionEstructurada}`, 
         ingreso_usd: mUSD, gasto_usd: 0, ingreso_bs: mBS, gasto_bs: 0 
       }]);
     }
-    alert("✅ Recaudación guardada con éxito."); 
-    setFormPagoResidente({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: '', descripcion: '' });
+    
+    alert("✅ Recaudación guardada e inyectada en el Libro Diario."); 
+    setFormPagoResidente({ apartamento: '', mes_seleccionado: '', anio_correspondiente: new Date().getFullYear().toString(), monto_pagado_usd: '', monto_pagado_bs: '', fecha_pago_real: new Date().toISOString().split('T')[0], descripcion_extra: '' });
     fetchPagosResidentes(); fetchTransacciones();
   };
 
@@ -166,7 +237,22 @@ export default function ERPTorreD10() {
   const handlePrint = (t: string) => { const o = document.title; document.title = t; window.print(); setTimeout(() => { document.title = o; }, 1000); };
   const formatMoney = (amount: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
 
-  // --- MOTOR CONTABLE INTEGRADO CON FECHAS DE PAGO REALES ---
+  // --- REDUCER DINÁMICO DE LA PESTAÑA 1 (FILTRADO POR AÑO DESDE TABLA GASTOS) ---
+  const finanzasTab1Calculadas = useMemo(() => {
+    const tFiltradas = transacciones.filter(t => filtroAnioTab1 === 'TODOS' || t.anio?.toString() === filtroAnioTab1);
+    
+    const iUSD = tFiltradas.reduce((acc, t) => acc + Number(t.ingreso_usd || 0), 0);
+    const gUSD = tFiltradas.reduce((acc, t) => acc + Number(t.gasto_usd || 0), 0);
+    const iBS = tFiltradas.reduce((acc, t) => acc + Number(t.ingreso_bs || 0), 0);
+    const gBS = tFiltradas.reduce((acc, t) => acc + Number(t.gasto_bs || 0), 0);
+
+    return {
+      ingresoUSD: iUSD, gastoUSD: gUSD, saldoUSD: iUSD - gUSD,
+      ingresoBs: iBS, gastoBs: gBS, saldoBs: iBS - gBS
+    };
+  }, [transacciones, filtroAnioTab1]);
+
+  // --- MOTOR CONTABLE CRONOLÓGICO INTELIGENTE (ESTADO DE CUENTA - TAB 2) ---
   const estadoDeCuentaGenerado = useMemo(() => {
     if (!filtroAptoTab2) return { lineas: [], deudaTotalUSD: 0, totalAbonadoUSD: 0, totalAbonadoBs: 0, propietario: null };
     
@@ -177,7 +263,8 @@ export default function ERPTorreD10() {
     let tUSD = 0, tBS = 0;
 
     pagosDelApto.forEach(p => {
-      tUSD += Number(p.monto_pagado_usd); tBS += Number(p.monto_pagado_bs);
+      tUSD += Number(p.monto_pagado_usd || 0); 
+      tBS += Number(p.monto_pagado_bs || 0);
       const clave = `${p.mes_correspondiente?.toString().toLowerCase().trim()}-${p.anio_correspondiente}`;
       mapaPagos.set(clave, p);
     });
@@ -200,22 +287,22 @@ export default function ERPTorreD10() {
       const pago = mapaPagos.get(claveBusqueda);
 
       if (pago) {
-        let fechaFormateada = pago.fecha_pago_real || '';
-        try { if(fechaFormateada.includes('-')) { const parts = fechaFormateada.split('-'); fechaFormateada = `${parts[2]}/${parts[1]}/${parts[0]}`; } } catch(e){}
+        let fPago = pago.fecha_pago_real || '';
+        if(fPago.includes('-')) { const pt = fPago.split('-'); fPago = `${pt[2]}/${pt[1]}/${pt[0]}`; }
         
         lineas.push({
           periodo: `${nomMes} ${anioIterador}`,
           estatus: 'PAGADO',
           cargos: 0,
-          desc_ref: `Pago cuota de ${nomMes} ${anioIterador} realizado el ${fechaFormateada || new Date(pago.created_at).toLocaleDateString()}`,
-          fecha_ejecucion: fechaFormateada
+          desc_ref: pago.descripcion || `Pago cuota realizado el ${fPago}`,
+          fecha_ejecucion: fPago || new Date(pago.created_at).toLocaleDateString()
         });
       } else {
         lineas.push({
           periodo: `${nomMes} ${anioIterador}`,
           estatus: 'PENDIENTE',
           cargos: CUOTA_MENSUAL_USD,
-          desc_ref: 'Cuota Mensual No Percibida',
+          desc_ref: 'Cuota Condominio Pendiente de Pago',
           fecha_ejecucion: '-'
         });
         deudaAcumulada += CUOTA_MENSUAL_USD;
@@ -225,14 +312,6 @@ export default function ERPTorreD10() {
 
     return { lineas, deudaTotalUSD: deudaAcumulada, totalAbonadoUSD: tUSD, totalAbonadoBs: tBS, propietario: resInfo };
   }, [filtroAptoTab2, pagosResidentes, propietarios]);
-
-  // --- REDUCERS GENERALES ---
-  const totalIngresoUSD = transacciones.reduce((acc, t) => acc + Number(t.ingreso_usd), 0);
-  const totalGastoUSD = transacciones.reduce((acc, t) => acc + Number(t.gasto_usd), 0);
-  const saldoActualUSD = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_usd : 0;
-  const totalIngresoBs = transacciones.reduce((acc, t) => acc + Number(t.ingreso_bs), 0);
-  const totalGastoBs = transacciones.reduce((acc, t) => acc + Number(t.gasto_bs), 0);
-  const saldoActualBs = transacciones.length > 0 ? transacciones[transacciones.length - 1].saldo_bs : 0;
 
   const dataResidentesFiltrada = pagosResidentes.filter(p => 
     (filtroAnio === '' || p.anio_correspondiente?.toString() === filtroAnio) && 
@@ -250,7 +329,7 @@ export default function ERPTorreD10() {
   if (!isAuth) {
     return (
       <div className="min-h-screen bg-emerald-950 flex items-center justify-center p-4">
-        <form onSubmit={handleLogin} className="bg-emerald-900 border border-emerald-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
+        <form onSubmit={handleLoginSubmit} className="bg-emerald-900 border border-emerald-800 p-8 rounded-2xl shadow-2xl w-full max-w-sm">
           <h1 className="text-xl font-bold text-center text-white uppercase tracking-widest mb-6">Torre D-10 ERP</h1>
           <input type="password" placeholder="Clave Tesorería" className="w-full bg-slate-950 border border-emerald-700 text-center rounded-lg p-3 text-white font-mono font-bold tracking-widest mb-6 outline-none focus:border-emerald-400" value={pin} onChange={e => setPin(e.target.value)} />
           <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3 rounded-lg uppercase text-xs tracking-wider transition-all">Ingresar al Sistema</button>
@@ -262,7 +341,6 @@ export default function ERPTorreD10() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-12">
       
-      {/* CSS DE IMPRESIÓN REPETITIVA C COMPACTA */}
       <style>{`
         @media print {
           @page { size: letter portrait; margin: 1.2cm; }
@@ -270,13 +348,13 @@ export default function ERPTorreD10() {
           .no-print { display: none !important; }
           .print-area { display: block !important; width: 100% !important; background: white !important; color: black !important; }
           .page-header-print { display: flex !important; flex-direction: column !important; margin-bottom: 15px; border-b: 2px solid black; padding-bottom: 8px; }
-          .print-table th { bg-color: #f3f4f6 !important; color: black !important; border: 1px solid #d1d5db !important; }
+          .print-table th { background-color: #f3f4f6 !important; color: black !important; border: 1px solid #d1d5db !important; }
           .print-table td { border: 1px solid #e5e7eb !important; color: black !important; }
         }
         .page-header-print { display: none; }
       `}</style>
       
-      {/* HEADER PRINCIPAL (PALETA VERDE) */}
+      {/* HEADER PRINCIPAL */}
       <header className="no-print bg-emerald-900 border-b border-emerald-800 py-4 px-6 sticky top-0 z-40 shadow-xl bg-opacity-95 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto flex flex-col gap-4">
           <div className="flex items-center justify-between w-full">
@@ -284,14 +362,14 @@ export default function ERPTorreD10() {
               <span className="text-2xl">🏛️</span>
               <div><h1 className="text-sm font-bold text-white uppercase tracking-widest">Torre D-10</h1><h2 className="text-[10px] text-emerald-300 uppercase tracking-widest">Enterprise Resource Planning</h2></div>
             </div>
-            <div className="text-center"><span className="bg-emerald-950 text-emerald-400 text-[10px] px-3 py-1 rounded-full border border-emerald-800 font-mono tracking-widest">SISTEMA INTEGRADO</span></div>
+            <div className="text-center"><span className="bg-emerald-950 text-emerald-400 text-[10px] px-3 py-1 rounded-full border border-emerald-800 font-mono tracking-widest">CONTABILIDAD SINCRONIZADA</span></div>
             <div><button onClick={handleLogout} className="text-[9px] bg-emerald-950 text-emerald-300 hover:bg-emerald-800 hover:text-white px-3 py-1.5 rounded font-bold uppercase tracking-widest border border-emerald-800 transition-all">Cerrar Sesión</button></div>
           </div>
           
           <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 overflow-x-auto gap-1 custom-scrollbar">
             {[
               { id: 'RESUMEN', label: '1. Resumen' }, { id: 'BUSQUEDA', label: '2. Estado de Cuenta' }, { id: 'BASE_DATOS', label: '3. Recaudación' }, 
-              { id: 'GASTOS_GRAL', label: '4. Gastos' }, { id: 'GASTOS_MENSUAL', label: '5. Cierre Mensual' }, { id: 'GESTION_DATOS', label: '6. Gestión de Datos' }
+              { id: 'GASTOS_GRAL', label: '4. Libro Diario' }, { id: 'GASTOS_MENSUAL', label: '5. Cierre Mensual' }, { id: 'GESTION_DATOS', label: '6. Gestión de Datos' }
             ].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-none py-2 px-4 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${activeTab === tab.id ? 'bg-emerald-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}>{tab.label}</button>
             ))}
@@ -301,24 +379,34 @@ export default function ERPTorreD10() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 pt-8">
         
-        {/* PESTAÑA 1: RESUMEN */}
+        {/* PESTAÑA 1: RESUMEN (INGRESOS Y GASTOS DERIVADOS DE LA PESTAÑA 4 FILTRADOS POR AÑO) */}
         {activeTab === 'RESUMEN' && (
           <div className="space-y-6 no-print">
-            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Resumen Financiero Consolidado</h2>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+              <h2 className="text-xl font-bold text-slate-300">Resumen Financiero Operativo</h2>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-400 uppercase font-bold">Filtro de Ejercicio:</label>
+                <select value={filtroAnioTab1} onChange={e => setFiltroAnioTab1(e.target.value)} className="p-2 bg-slate-900 border border-slate-800 rounded text-xs font-mono text-emerald-400 focus:outline-none">
+                  <option value="TODOS">Ver Todo el Histórico</option>
+                  {listaAniosFiltro.map(a => <option key={a} value={a}>Año {a}</option>)}
+                </select>
+              </div>
+            </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Ingresos USD</p><p className="text-2xl font-mono font-bold text-emerald-400">${formatMoney(totalIngresoUSD)}</p></div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Gastos USD</p><p className="text-2xl font-mono font-bold text-red-400">${formatMoney(totalGastoUSD)}</p></div>
-              <div className="bg-emerald-950 p-6 rounded-xl border border-emerald-800 bg-opacity-30"><p className="text-[10px] text-emerald-400 uppercase font-bold mb-1">Saldo Actual USD</p><p className="text-3xl font-mono font-bold text-white">${formatMoney(saldoActualUSD)}</p></div>
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Ingresos de Caja USD</p><p className="text-2xl font-mono font-bold text-emerald-400">${formatMoney(finanzasTab1Calculadas.ingresoUSD)}</p></div>
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Egresos de Caja USD</p><p className="text-2xl font-mono font-bold text-red-400">${formatMoney(finanzasTab1Calculadas.gastoUSD)}</p></div>
+              <div className="bg-emerald-950 p-6 rounded-xl border border-emerald-800 bg-opacity-30"><p className="text-[10px] text-emerald-400 uppercase font-bold mb-1">Balance Neto USD</p><p className="text-3xl font-mono font-bold text-white">${formatMoney(finanzasTab1Calculadas.saldoUSD)}</p></div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Ingresos Bs</p><p className="text-2xl font-mono font-bold text-emerald-400">Bs {formatMoney(totalIngresoBs)}</p></div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Total Gastos Bs</p><p className="text-2xl font-mono font-bold text-red-400">Bs {formatMoney(totalGastoBs)}</p></div>
-              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Saldo Actual Bs</p><p className="text-3xl font-mono font-bold text-amber-500">Bs {formatMoney(saldoActualBs)}</p></div>
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Ingresos de Caja Bs</p><p className="text-2xl font-mono font-bold text-emerald-400">Bs {formatMoney(finanzasTab1Calculadas.ingresoBs)}</p></div>
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Egresos de Caja Bs</p><p className="text-2xl font-mono font-bold text-red-400">Bs {formatMoney(finanzasTab1Calculadas.gastoBs)}</p></div>
+              <div className="bg-slate-900 p-6 rounded-xl border border-slate-800"><p className="text-[10px] text-slate-400 uppercase font-bold mb-1">Balance Neto Bs</p><p className="text-3xl font-mono font-bold text-amber-500">Bs {formatMoney(finanzasTab1Calculadas.saldoBs)}</p></div>
             </div>
           </div>
         )}
 
-        {/* PESTAÑA 2: ESTADO DE CUENTA (COMPACTO, REPETITIVO E INTEGRADO) */}
+        {/* PESTAÑA 2: ESTADO DE CUENTA */}
         {activeTab === 'BUSQUEDA' && (
           <div className="space-y-6">
             <div className="no-print flex justify-between items-center border-b border-slate-800 pb-2">
@@ -337,11 +425,10 @@ export default function ERPTorreD10() {
             {filtroAptoTab2 && (
               <div className="print-area bg-white text-black p-6 rounded-xl border border-gray-200 shadow-sm">
                 
-                {/* Cabecera repetitiva compacta para cada hoja física */}
                 <div className="page-header-print flex justify-between items-center border-b-2 border-black pb-2 mb-4">
                   <div>
                     <h1 className="text-xl font-bold tracking-wider">TORRE D-10</h1>
-                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Estado de Cuenta de Procondominio</p>
+                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Estado de Cuenta Oficial de Procondominio</p>
                   </div>
                   <div className="text-right">
                     <p className="text-lg font-bold">APARTAMENTO {filtroAptoTab2}</p>
@@ -349,18 +436,16 @@ export default function ERPTorreD10() {
                   </div>
                 </div>
 
-                {/* Bloque Informativo Compacto */}
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 border border-gray-300 p-3 rounded mb-4 text-xs text-gray-900">
                   <div>
                     <p className="mb-0.5"><strong className="font-bold">Propietario:</strong> {estadoDeCuentaGenerado.propietario?.propietario || 'No registrado en el censo'}</p>
-                    <p><strong className="font-bold">Cédula:</strong> {estadoDeCuentaGenerado.propietario?.cedula ? `V-${estadoDeCuentaGenerado.propietario.cedula}` : 'Pendiente'}</p>
+                    <p><strong className="font-bold">Cédula de Identidad:</strong> {estadoDeCuentaGenerado.propietario?.cedula ? `V-${estadoDeCuentaGenerado.propietario.cedula}` : 'Pendiente'}</p>
                   </div>
                   <div className="text-right">
                     <p><strong className="font-bold">Fecha de Ingreso a la Torre:</strong> <span className="uppercase">{estadoDeCuentaGenerado.propietario?.inicio_mes || 'N/A'} {estadoDeCuentaGenerado.propietario?.inicio_ano || ''}</span></p>
                   </div>
                 </div>
 
-                {/* Tarjetas de Saldos Compactas */}
                 <div className="grid grid-cols-3 gap-4 mb-4 text-center">
                   <div className="border border-red-300 bg-red-50 p-3 rounded">
                     <p className="text-[9px] text-red-800 uppercase tracking-widest font-bold">Deuda Pendiente</p>
@@ -393,7 +478,7 @@ export default function ERPTorreD10() {
                         <td className="p-2.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider ${l.estatus === 'PAGADO' ? 'text-emerald-800 bg-emerald-100 border border-emerald-200' : 'text-red-800 bg-red-100 border border-red-200'}`}>{l.estatus}</span></td>
                         <td className="p-2.5 font-mono text-gray-600">{l.fecha_ejecucion}</td>
                         <td className="p-2.5 text-right font-mono text-gray-700">{l.cargos > 0 ? `$${formatMoney(l.cargos)}` : '-'}</td>
-                        <td className="p-2.5 text-right text-gray-600 font-mono text-[10px] max-w-[280px] truncate">{l.desc_ref}</td>
+                        <td className="p-2.5 text-right text-gray-600 font-mono text-[10px] max-w-[320px] truncate">{l.desc_ref}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -403,26 +488,62 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 3: RECAUDACIÓN (FILTROS COMPLETAMENTE CORREGIDOS CON LISTAS DESPLEGABLES) */}
+        {/* PESTAÑA 3: RECAUDACIÓN AUTOMATIZADA CON REGLAS DE NOMENCLATURA */}
         {activeTab === 'BASE_DATOS' && (
           <div className="space-y-6 no-print">
             <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Mayor de Cobros Manuales</h2>
             <form onSubmit={handleRegistrarPagoResidente} className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Apartamento</label><select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" required><option value="">-- Elegir Apto --</option>{listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año de la Cuota</label><select value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" required>{listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Mes Solvente</label><select value={formPagoResidente.mes_seleccionado} onChange={e => setFormPagoResidente({...formPagoResidente, mes_seleccionado: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" required><option value="">-- Mes Objeto --</option>{mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fecha Física de Pago</label><input type="date" value={formPagoResidente.fecha_pago_real} onChange={e => setFormPagoResidente({...formPagoResidente, fecha_pago_real: e.target.value})} className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none cursor-pointer" required /></div>
+              
+              {/* Botón de Automatización Inteligente */}
+              <div className="mb-4 bg-slate-950 p-3 rounded-lg border border-slate-800 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <input type="checkbox" id="autoCheck" checked={autoMesPendiente} onChange={e => setAutoMesPendiente(e.target.checked)} className="h-4 w-4 accent-emerald-500 cursor-pointer" />
+                  <label htmlFor="autoCheck" className="text-xs font-bold text-slate-300 uppercase cursor-pointer">
+                    Asignar automáticamente al mes cronológico pendiente más antiguo
+                  </label>
+                </div>
+                {autoMesPendiente && formPagoResidente.apartamento && (
+                  <span className="text-[10px] font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800 uppercase tracking-wider">
+                    Siguiente Periodo Detectado: {formPagoResidente.mes_seleccionado} - {formPagoResidente.anio_correspondiente}
+                  </span>
+                )}
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Apartamento</label>
+                  <select value={formPagoResidente.apartamento} onChange={e => setFormPagoResidente({...formPagoResidente, apartamento: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" required>
+                    <option value="">-- Elegir Apto --</option>
+                    {listaApartamentos.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Año de la Cuota</label>
+                  <select value={formPagoResidente.anio_correspondiente} onChange={e => setFormPagoResidente({...formPagoResidente, anio_correspondiente: e.target.value})} disabled={autoMesPendiente} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none disabled:opacity-50">
+                    {listaAniosFiltro.map(ano => <option key={ano} value={ano}>{ano}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Mes de la Cuota</label>
+                  <select value={formPagoResidente.mes_seleccionado} onChange={e => setFormPagoResidente({...formPagoResidente, mes_seleccionado: e.target.value})} disabled={autoMesPendiente} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none disabled:opacity-50">
+                    <option value="">-- Asignar Mes --</option>
+                    {mesesDelAno.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fecha de Pago</label>
+                  <input type="date" value={formPagoResidente.fecha_pago_real} onChange={e => setFormPagoResidente({...formPagoResidente, fecha_pago_real: e.target.value})} className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none cursor-pointer" required />
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado USD</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_usd} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_usd: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
-                <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado Bs</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
-                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Descripción / Referencia Bancaria</label><input type="text" placeholder="Ej: Referencia Zelle o Transferencia..." value={formPagoResidente.descripcion} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" /></div>
+                <div><label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">Monto Abonado BS</label><input type="number" step="0.01" placeholder="0.00" value={formPagoResidente.monto_pagado_bs} onChange={e => setFormPagoResidente({...formPagoResidente, monto_pagado_bs: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm font-mono text-white focus:border-emerald-500 focus:outline-none" /></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Detalle Extra (Añadir al final de la nomenclatura)</label><input type="text" placeholder="Ej: Ref Factura, Banco, Pago Móvil..." value={formPagoResidente.descripcion_extra} onChange={e => setFormPagoResidente({...formPagoResidente, descripcion_extra: e.target.value})} className="w-full p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 focus:outline-none" /></div>
               </div>
-              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Registrar Recaudación</button></div>
+              <div className="flex justify-end"><button type="submit" className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-lg text-xs uppercase tracking-widest shadow-md transition-all">💾 Registrar Cobro</button></div>
             </form>
 
-            {/* CASILLAS DE FILTRADO INTERACTIVAS MEDIANTE SELECTS */}
             <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
               <p className="text-[10px] uppercase tracking-widest font-bold text-slate-400 mb-3">Filtros de Auditoría Avanzada</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -435,12 +556,12 @@ export default function ERPTorreD10() {
 
             <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
               <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]"><tr><th className="p-4">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Mes Objeto</th><th className="p-4">Fecha Pago Real</th><th className="p-4">Descripción</th><th className="p-4 text-right">Abono USD</th><th className="p-4 text-right">Abono Bs</th><th className="p-4 text-center">Acciones</th></tr></thead>
+                <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]"><tr><th className="p-4">Nivel</th><th className="p-4">Apartamento</th><th className="p-4">Mes Objeto</th><th className="p-4">Fecha de Pago</th><th className="p-4">Descripción / Nomenclatura</th><th className="p-4 text-right">Abono USD</th><th className="p-4 text-right">Abono Bs</th><th className="p-4 text-center">Acciones</th></tr></thead>
                 <tbody className="divide-y divide-slate-800">
                   {dataResidentesFiltrada.length === 0 ? (<tr><td colSpan={8} className="p-6 text-center text-slate-500 font-mono">No existen abonos registrados que coincidan con la búsqueda.</td></tr>) : (
                     dataResidentesFiltrada.map(item => (
                       <tr key={item.id} className="hover:bg-slate-800/40">
-                        <td className="p-4 font-mono text-slate-400">Piso {item.piso}</td><td className="p-4 font-bold text-emerald-400">{item.apartamento}</td><td className="p-4 font-medium">{item.mes_correspondiente} {item.anio_correspondiente}</td><td className="p-4 font-mono text-slate-300">{item.fecha_pago_real}</td><td className="p-4 text-slate-400 text-[11px] font-mono truncate max-w-[150px]">{item.descripcion}</td><td className="p-4 text-right font-mono font-bold text-emerald-400">${formatMoney(item.monto_pagado_usd)}</td><td className="p-4 text-right font-mono font-bold text-emerald-400">Bs {formatMoney(item.monto_pagado_bs)}</td>
+                        <td className="p-4 font-mono text-slate-400">Piso {item.piso}</td><td className="p-4 font-bold text-emerald-400">{item.apartamento}</td><td className="p-4 font-medium">{item.mes_correspondiente} {item.anio_correspondiente}</td><td className="p-4 font-mono text-slate-300">{item.fecha_pago_real}</td><td className="p-4 text-slate-300 text-[11px] font-mono truncate max-w-[240px]">{item.descripcion}</td><td className="p-4 text-right font-mono font-bold text-emerald-400">${formatMoney(item.monto_pagado_usd)}</td><td className="p-4 text-right font-mono font-bold text-emerald-400">Bs {formatMoney(item.monto_pagado_bs)}</td>
                         <td className="p-4 text-center"><button onClick={() => handleEliminarPagoResidente(item.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button></td>
                       </tr>
                     ))
@@ -451,10 +572,10 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 4: GASTOS */}
+        {/* PESTAÑA 4: LIBRO DIARIO */}
         {activeTab === 'GASTOS_GRAL' && (
           <div className="space-y-6 no-print">
-            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Diario de Egresos Operativos</h2>
+            <h2 className="text-xl font-bold border-b border-slate-800 pb-2 text-slate-300">Libro Diario de Caja Operativo</h2>
             <form onSubmit={handleRegistrarMovimiento} className="bg-slate-900 p-6 rounded-xl border border-slate-800">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <input type="text" placeholder="Año" value={formGasto.anio} onChange={e => setFormGasto({...formGasto, anio: e.target.value})} className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white focus:border-emerald-500 outline-none" required />
@@ -470,7 +591,7 @@ export default function ERPTorreD10() {
             </form>
             <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-x-auto">
                <table className="w-full text-left text-xs whitespace-nowrap">
-                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]"><tr><th className="p-4">Periodo</th><th className="p-4">Descripción / Ref</th><th className="p-4 text-right text-emerald-400">Ingreso $</th><th className="p-4 text-right text-red-400">Gasto $</th><th className="p-4 text-right">Saldo $</th><th className="p-4 text-right text-emerald-400">Ingreso Bs</th><th className="p-4 text-right text-red-400">Gasto Bs</th><th className="p-4 text-right">Saldo Bs</th><th className="p-4 text-center">Acciones</th></tr></thead>
+                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[9px]"><tr><th className="p-4">Periodo Contable</th><th className="p-4">Descripción / Unidad Ref</th><th className="p-4 text-right text-emerald-400">Ingreso $</th><th className="p-4 text-right text-red-400">Gasto $</th><th className="p-4 text-right">Saldo $</th><th className="p-4 text-right text-emerald-400">Ingreso Bs</th><th className="p-4 text-right text-red-400">Gasto Bs</th><th className="p-4 text-right">Saldo Bs</th><th className="p-4 text-center">Acciones</th></tr></thead>
                  <tbody className="divide-y divide-slate-800">
                     {transacciones.map(t => (
                       <tr key={t.id} className="hover:bg-slate-800/40">
@@ -482,7 +603,7 @@ export default function ERPTorreD10() {
                         <td className="p-4 text-right font-mono text-emerald-500">{Number(t.ingreso_bs) > 0 ? `+${formatMoney(t.ingreso_bs)}` : '-'}</td>
                         <td className="p-4 text-right font-mono text-red-500">{Number(t.gasto_bs) > 0 ? `-${formatMoney(t.gasto_bs)}` : '-'}</td>
                         <td className="p-4 text-right font-mono font-bold bg-slate-950/40">{formatMoney(t.saldo_bs)}</td>
-                        <td className="p-4 text-center"><button onClick={() => handleEliminarTransaccion(t.id)} className="bg-slate-800 text-red-400 hover:bg-red-500 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button></td>
+                        <td className="p-4 text-center"><button onClick={() => handleEliminarTransaccion(t.id)} className="bg-slate-800 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded text-xs border border-slate-700 transition-all">🗑️</button></td>
                       </tr>
                     ))}
                  </tbody>
@@ -512,7 +633,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* PESTAÑA 6: GESTIÓN DE DATOS (HORIZONTAL, SIN BOTÓN DE "TODOS") */}
+        {/* PESTAÑA 6: GESTIÓN DE DATOS */}
         {activeTab === 'GESTION_DATOS' && (
           <div className="no-print flex flex-col gap-6 animate-fadeIn">
             <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
@@ -547,7 +668,7 @@ export default function ERPTorreD10() {
           </div>
         )}
 
-        {/* MODAL EJECUTIVO EDICIÓN CENSO */}
+        {/* MODAL EDICIÓN CENSO */}
         {editingProp && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 no-print">
             <form onSubmit={handleSavePropietario} className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-md space-y-4">
@@ -558,7 +679,7 @@ export default function ERPTorreD10() {
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Piso</label><input type="text" value={editingProp.piso || ''} onChange={e => setEditingProp({...editingProp, piso: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white capitalize">{<option value="">-- Mes --</option>}{mesesLetras.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Mes de Ingreso</label><select value={editingProp.inicio_mes || ''} onChange={e => setEditingProp({...editingProp, inicio_mes: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white capitalize">{<option value="">-- Mes --</option>}{mesesDelAno.map(m => <option key={m} value={m.toLowerCase()}>{m}</option>)}</select></div>
                 <div><label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Año de Ingreso</label><select value={editingProp.inicio_ano || ''} onChange={e => setEditingProp({...editingProp, inicio_ano: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-sm text-white">{<option value="">-- Año --</option>}{listaAniosFiltro.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
               </div>
               <div className="flex gap-3 pt-2">
